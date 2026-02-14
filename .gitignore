@@ -1,0 +1,45 @@
+# KiCAD backup files
+*.bak
+*.backup
+*~
+*.kicad_pcb-bak
+*.sch-bak
+*.kicad_sch-bak
+*-backups/
+
+# KiCAD cache
+fp-info-cache
+
+# PlatformIO
+.pio/
+.platformio/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local development/agent files
+CLAUDE.md
+.claude/
+
+# CRITICAL: Secrets - never commit credentials
+src/Secrets.h
+src/secrets.h
+secrets.h
+*.zip
+
+# Temporary/backup files
+*.orig
+*.tmp
+
+# FreeCAD temporary and backup files
+.xdp-*
+*.FCBak*
+*.FCStd1
+*.FCStd2
