@@ -801,7 +801,9 @@ void create_screen_page_trailer() {
                     lv_label_set_text(obj, "\uf6fc");
                 }
                 {
+                    // LabelElevationValue
                     lv_obj_t *obj = lv_label_create(parent_obj);
+                    objects.label_elevation_value = obj;
                     lv_obj_set_pos(obj, 45, 10);
                     lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
                     add_style_label_default(obj);
@@ -830,7 +832,9 @@ void create_screen_page_trailer() {
                     lv_label_set_text(obj, "\uf7c0");
                 }
                 {
+                    // LabelNumberOfSatsValue
                     lv_obj_t *obj = lv_label_create(parent_obj);
+                    objects.label_number_of_sats_value = obj;
                     lv_obj_set_pos(obj, -5, 10);
                     lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
                     add_style_label_default(obj);
@@ -839,7 +843,9 @@ void create_screen_page_trailer() {
                     lv_label_set_text(obj, "20");
                 }
                 {
+                    // LabelGpsModeValue
                     lv_obj_t *obj = lv_label_create(parent_obj);
+                    objects.label_gps_mode_value = obj;
                     lv_obj_set_pos(obj, 5, 5);
                     lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
                     add_style_label_default(obj);
@@ -1000,7 +1006,7 @@ void create_screen_page_power_management() {
             lv_obj_set_style_pad_bottom(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_bg_opa(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_border_width(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            create_user_widget_bottom_nav_bar(obj, 80);
+            create_user_widget_bottom_nav_bar(obj, 83);
             lv_obj_set_style_align(obj, LV_ALIGN_BOTTOM_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
         }
         {
@@ -1387,7 +1393,7 @@ void create_screen_page_power_management() {
 }
 
 void tick_screen_page_power_management() {
-    tick_user_widget_bottom_nav_bar(80);
+    tick_user_widget_bottom_nav_bar(83);
 }
 
 void create_screen_page_air_quality() {
@@ -1410,7 +1416,7 @@ void create_screen_page_air_quality() {
             lv_obj_set_style_pad_bottom(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_bg_opa(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_border_width(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            create_user_widget_bottom_nav_bar(obj, 111);
+            create_user_widget_bottom_nav_bar(obj, 114);
             lv_obj_set_style_align(obj, LV_ALIGN_BOTTOM_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
         }
         {
@@ -1481,7 +1487,7 @@ void create_screen_page_air_quality() {
 }
 
 void tick_screen_page_air_quality() {
-    tick_user_widget_bottom_nav_bar(111);
+    tick_user_widget_bottom_nav_bar(114);
 }
 
 void create_screen_page_water() {
@@ -1507,7 +1513,7 @@ void create_screen_page_water() {
             lv_obj_set_style_pad_bottom(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_bg_opa(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_border_width(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            create_user_widget_bottom_nav_bar(obj, 120);
+            create_user_widget_bottom_nav_bar(obj, 123);
             lv_obj_set_style_align(obj, LV_ALIGN_BOTTOM_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
         }
         {
@@ -1604,7 +1610,7 @@ void create_screen_page_water() {
 }
 
 void tick_screen_page_water() {
-    tick_user_widget_bottom_nav_bar(120);
+    tick_user_widget_bottom_nav_bar(123);
 }
 
 void create_screen_page_settings() {
@@ -1627,7 +1633,7 @@ void create_screen_page_settings() {
             lv_obj_set_style_pad_bottom(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_bg_opa(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_border_width(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-            create_user_widget_bottom_nav_bar(obj, 130);
+            create_user_widget_bottom_nav_bar(obj, 133);
             lv_obj_set_style_align(obj, LV_ALIGN_BOTTOM_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
         }
         {
@@ -2086,7 +2092,7 @@ void create_screen_page_settings() {
 }
 
 void tick_screen_page_settings() {
-    tick_user_widget_bottom_nav_bar(130);
+    tick_user_widget_bottom_nav_bar(133);
 }
 
 void create_user_widget_bottom_nav_bar(lv_obj_t *parent_obj, int startWidgetIndex) {

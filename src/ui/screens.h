@@ -78,8 +78,11 @@ typedef struct _objects_t {
     lv_obj_t *label_front_leve_label;
     lv_obj_t *obj5;
     lv_obj_t *obj6;
+    lv_obj_t *label_elevation_value;
     lv_obj_t *obj7;
     lv_obj_t *obj8;
+    lv_obj_t *label_number_of_sats_value;
+    lv_obj_t *label_gps_mode_value;
     lv_obj_t *panel_trailer_back;
     lv_obj_t *label_left_side_level_fa_indicator;
     lv_obj_t *label_left_side_level_value;

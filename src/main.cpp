@@ -33,9 +33,11 @@ static bool screen_timed_out = false;
 #define CAN_TX 17
 #define CAN_RX 18
 #define CAN_BAUDRATE 500000
-#define CAN_ID_TOGGLE       0x18
-#define CAN_ID_STATUS       0x1B
-#define CAN_ID_TEMPERATURE  0x1F
+#define CAN_ID_GPS_SAT_SPEED  0x07
+#define CAN_ID_GPS_ALTITUDE   0x08
+#define CAN_ID_TOGGLE         0x18
+#define CAN_ID_STATUS         0x1B
+#define CAN_ID_TEMPERATURE    0x1F
 
 // Device state received from PDM (updated from CAN RX task)
 volatile uint8_t g_device_pwm[8] = {0};
@@ -44,6 +46,13 @@ volatile bool g_device_status_updated = false;
 // Temperature received from TempSensor (CAN ID 0x1F, byte 1 = °F)
 volatile uint8_t g_interior_temp_f = 0;
 volatile bool g_temperature_updated = false;
+
+// GPS data received from GpsModule (CAN IDs 0x07, 0x08)
+volatile uint8_t  g_gps_num_sats = 0;
+volatile uint8_t  g_gps_gnss_mode = 0;   // 0=No Fix, 1=2D, 2=3D
+volatile uint32_t g_gps_altitude_raw = 0; // raw value, scale 0.01 = meters
+volatile bool g_gps_sat_updated = false;
+volatile bool g_gps_alt_updated = false;
 
 // Touch configuration
 #define TOUCH_SDA 19
@@ -215,6 +224,18 @@ static void can_rx_callback(const twai_message_t &msg) {
     } else if (msg.identifier == CAN_ID_TEMPERATURE && msg.data_length_code >= 2) {
         g_interior_temp_f = msg.data[1];
         g_temperature_updated = true;
+    } else if (msg.identifier == CAN_ID_GPS_SAT_SPEED && msg.data_length_code >= 6) {
+        // Byte 0 = NumSatellitesUsed, Byte 5 = GnssMode (constellation combo 1-7)
+        g_gps_num_sats = msg.data[0];
+        g_gps_gnss_mode = msg.data[5];
+        g_gps_sat_updated = true;
+    } else if (msg.identifier == CAN_ID_GPS_ALTITUDE && msg.data_length_code >= 4) {
+        // 32-bit big-endian altitude, scale 0.01 = meters
+        g_gps_altitude_raw = ((uint32_t)msg.data[0] << 24) |
+                             ((uint32_t)msg.data[1] << 16) |
+                             ((uint32_t)msg.data[2] << 8)  |
+                             ((uint32_t)msg.data[3]);
+        g_gps_alt_updated = true;
     }
 }
 
@@ -350,6 +371,21 @@ void setup() {
     // Override the fade animation from ui_init with an instant load
     lv_disp_load_scr(objects.page_home);
 
+    // Default all CAN-sourced data labels to "-" until real data arrives
+    lv_label_set_text(objects.label_current_interior_temperature, "-");
+    lv_label_set_text(objects.label_current_exterior_temperature, "-");
+    lv_label_set_text(objects.label_elevation_value, "-");
+    lv_label_set_text(objects.label_number_of_sats_value, "-");
+    lv_label_set_text(objects.label_gps_mode_value, "-");
+    lv_label_set_text(objects.label_front_level_value, "-");
+    lv_label_set_text(objects.label_back_level_value, "-");
+    lv_label_set_text(objects.label_left_side_level_value, "-");
+    lv_label_set_text(objects.label_right_side_level_value, "-");
+    lv_label_set_text(objects.label_power_battery_percentage, "-");
+    lv_label_set_text(objects.label_battery_voltage, "-");
+    lv_label_set_text(objects.label_power_remaining_time_to_go_value, "-");
+    lv_label_set_text(objects.lbl_all_on_off, "All On");
+
     // Initialize CAN bus (TWAI) for PDM communication
     TwaiTaskBased::onReceive(can_rx_callback);
     if (TwaiTaskBased::begin((gpio_num_t)CAN_TX, (gpio_num_t)CAN_RX, CAN_BAUDRATE)) {
@@ -389,6 +425,35 @@ void loop() {
         set_var_current_interior_temperature(temp_f);
         lv_label_set_text_fmt(objects.label_current_interior_temperature,
             "%d", (int)temp_f);
+    }
+
+    // Update GPS satellite count and GNSS mode from CAN
+    if (g_gps_sat_updated) {
+        g_gps_sat_updated = false;
+        lv_label_set_text_fmt(objects.label_number_of_sats_value, "%d", (int)g_gps_num_sats);
+        set_var_satellite_count((int32_t)g_gps_num_sats);
+
+        // DFRobot GNSS mode = active constellation combination (matches PWA strings)
+        const char *mode_str;
+        switch (g_gps_gnss_mode) {
+            case 1: mode_str = "Gps";                       break;
+            case 2: mode_str = "Beidou";                    break;
+            case 3: mode_str = "Gps + Beidou";              break;
+            case 4: mode_str = "Glonass";                   break;
+            case 5: mode_str = "Gps + Glonass";             break;
+            case 6: mode_str = "Beidou + Glonass";          break;
+            case 7: mode_str = "Gps + Beidou + Glonass";    break;
+            default: mode_str = "No Fix";                   break;
+        }
+        lv_label_set_text(objects.label_gps_mode_value, mode_str);
+    }
+
+    // Update GPS elevation from CAN (raw * 0.01 = meters, convert to feet)
+    if (g_gps_alt_updated) {
+        g_gps_alt_updated = false;
+        double alt_m = (double)g_gps_altitude_raw * 0.01;
+        int alt_ft = (int)(alt_m * 3.28084);
+        lv_label_set_text_fmt(objects.label_elevation_value, "%d", alt_ft);
     }
 
     // Save settings to NVM when changed
