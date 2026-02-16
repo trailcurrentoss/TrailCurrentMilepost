@@ -27,6 +27,7 @@ extern void action_hide_wifi_keyboard(lv_event_t * e);
 extern void action_scan_wifi_networks(lv_event_t * e);
 extern void action_wifi_network_selected(lv_event_t * e);
 extern void action_connect_to_wifi(lv_event_t * e);
+extern void action_all_on_off(lv_event_t * e);
 
 
 #ifdef __cplusplus

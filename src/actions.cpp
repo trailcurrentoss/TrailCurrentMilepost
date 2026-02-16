@@ -239,3 +239,34 @@ void action_wifi_network_selected(lv_event_t *e) {
 void action_connect_to_wifi(lv_event_t *e) {
     // TODO: Implement WiFi connection
 }
+
+void action_all_on_off(lv_event_t *e) {
+    // Ignore events bubbled up from child labels
+    if (lv_event_get_target(e) != lv_event_get_current_target(e)) return;
+
+    // Debounce: ignore rapid repeated taps within 300ms
+    static unsigned long last_send_ms = 0;
+    unsigned long now = millis();
+    if (now - last_send_ms < 300) return;
+    last_send_ms = now;
+
+    // Check if any device is currently on
+    extern volatile uint8_t g_device_pwm[8];
+    bool any_on = false;
+    for (int i = 0; i < 8; i++) {
+        if (g_device_pwm[i] > 0) { any_on = true; break; }
+    }
+
+    // Send all-on or all-off command: CAN ID 0x18, data[0]=8, data[1]=0(off)/1(on)
+    twai_message_t msg = {};
+    msg.identifier = 0x18;
+    msg.data_length_code = 2;
+    msg.data[0] = 8;
+    msg.data[1] = any_on ? 0 : 1;
+
+    if (TwaiTaskBased::send(msg, 0)) {
+        debugf("CAN TX: all %s\n", any_on ? "off" : "on");
+    } else {
+        debugln("CAN TX failed: all on/off");
+    }
+}

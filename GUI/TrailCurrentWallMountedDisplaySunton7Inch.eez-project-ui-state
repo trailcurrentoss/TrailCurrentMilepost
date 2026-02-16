@@ -200,10 +200,10 @@
                 {
                   "type": "tab",
                   "id": "#f0a64a95-90d0-4fb4-bf8c-a92be08dddba",
-                  "name": "PageWater",
+                  "name": "PageAirQuality",
                   "component": "editor",
                   "config": {
-                    "objectPath": "[TrailCurrentWallMountedDisplaySunton7Inch.eez-project]:/userPages/4",
+                    "objectPath": "[TrailCurrentWallMountedDisplaySunton7Inch.eez-project]:/userPages/3",
                     "permanent": false
                   },
                   "icon": "svg:page"
@@ -264,7 +264,8 @@
                   },
                   "icon": "material:settings"
                 }
-              ]
+              ],
+              "active": true
             },
             {
               "type": "row",
@@ -284,8 +285,7 @@
                       "enableClose": false,
                       "icon": "svg:properties"
                     }
-                  ],
-                  "active": true
+                  ]
                 },
                 {
                   "type": "tabset",

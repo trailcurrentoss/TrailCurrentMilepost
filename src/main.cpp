@@ -373,6 +373,13 @@ void loop() {
     if (g_device_status_updated) {
         g_device_status_updated = false;
         update_device_status_indicators(false);
+
+        // Update All On/Off button label based on whether any device is on
+        bool any_on = false;
+        for (int i = 0; i < 8; i++) {
+            if (g_device_pwm[i] > 0) { any_on = true; break; }
+        }
+        lv_label_set_text(objects.lbl_all_on_off, any_on ? "All Off" : "All On");
     }
 
     // Update interior temperature from CAN
