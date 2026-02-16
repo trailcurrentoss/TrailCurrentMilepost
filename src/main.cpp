@@ -38,6 +38,9 @@ static bool screen_timed_out = false;
 #define CAN_ID_TOGGLE         0x18
 #define CAN_ID_STATUS         0x1B
 #define CAN_ID_TEMPERATURE    0x1F
+#define CAN_ID_BATT_SHUNT1    0x23
+#define CAN_ID_BATT_SHUNT2    0x24
+#define CAN_ID_SOLAR_MPPT1    0x2C
 
 // Device state received from PDM (updated from CAN RX task)
 volatile uint8_t g_device_pwm[8] = {0};
@@ -53,6 +56,23 @@ volatile uint8_t  g_gps_gnss_mode = 0;   // 0=No Fix, 1=2D, 2=3D
 volatile uint32_t g_gps_altitude_raw = 0; // raw value, scale 0.01 = meters
 volatile bool g_gps_sat_updated = false;
 volatile bool g_gps_alt_updated = false;
+
+// Battery shunt data (CAN IDs 0x23, 0x24)
+volatile uint8_t  g_batt_voltage_whole = 0;
+volatile uint8_t  g_batt_voltage_dec = 0;
+volatile uint8_t  g_batt_soc_whole = 0;
+volatile uint8_t  g_batt_soc_dec = 0;
+volatile bool     g_batt_shunt1_updated = false;
+
+volatile uint8_t  g_is_wattage_negative = 0;
+volatile uint16_t g_shunt_wattage = 0;
+volatile uint16_t g_time_to_go_min = 0;
+volatile bool     g_batt_shunt2_updated = false;
+
+// Solar MPPT data (CAN ID 0x2C)
+volatile uint16_t g_solar_wattage = 0;
+volatile uint8_t  g_solar_charge_status = 0;
+volatile bool     g_solar_mppt1_updated = false;
 
 // Touch configuration
 #define TOUCH_SDA 19
@@ -236,6 +256,24 @@ static void can_rx_callback(const twai_message_t &msg) {
                              ((uint32_t)msg.data[2] << 8)  |
                              ((uint32_t)msg.data[3]);
         g_gps_alt_updated = true;
+    } else if (msg.identifier == CAN_ID_BATT_SHUNT1 && msg.data_length_code >= 7) {
+        // BatteryShuntData1: voltage(2), current sign+value(3), SOC(2)
+        g_batt_voltage_whole = msg.data[0];
+        g_batt_voltage_dec   = msg.data[1];
+        g_batt_soc_whole     = msg.data[5];
+        g_batt_soc_dec       = msg.data[6];
+        g_batt_shunt1_updated = true;
+    } else if (msg.identifier == CAN_ID_BATT_SHUNT2 && msg.data_length_code >= 5) {
+        // BatteryShuntData2: wattage sign(1), wattage(2), time-to-go(2)
+        g_is_wattage_negative = msg.data[0];
+        g_shunt_wattage = ((uint16_t)msg.data[1] << 8) | (uint16_t)msg.data[2];
+        g_time_to_go_min = ((uint16_t)msg.data[3] << 8) | (uint16_t)msg.data[4];
+        g_batt_shunt2_updated = true;
+    } else if (msg.identifier == CAN_ID_SOLAR_MPPT1 && msg.data_length_code >= 7) {
+        // SolarMpptData1: panelV(2), solarW(2), battV(2), chargeStatus(1)
+        g_solar_wattage = ((uint16_t)msg.data[2] << 8) | (uint16_t)msg.data[3];
+        g_solar_charge_status = msg.data[6];
+        g_solar_mppt1_updated = true;
     }
 }
 
@@ -384,6 +422,9 @@ void setup() {
     lv_label_set_text(objects.label_power_battery_percentage, "-");
     lv_label_set_text(objects.label_battery_voltage, "-");
     lv_label_set_text(objects.label_power_remaining_time_to_go_value, "-");
+    lv_label_set_text(objects.label_solar_wattage, "-");
+    lv_label_set_text(objects.label_curent_charge_mode, "-");
+    lv_label_set_text(objects.label_shunt_current_watts_used, "-");
     lv_label_set_text(objects.lbl_all_on_off, "All On");
 
     // Initialize CAN bus (TWAI) for PDM communication
@@ -454,6 +495,60 @@ void loop() {
         double alt_m = (double)g_gps_altitude_raw * 0.01;
         int alt_ft = (int)(alt_m * 3.28084);
         lv_label_set_text_fmt(objects.label_elevation_value, "%d", alt_ft);
+    }
+
+    // Update battery voltage and SOC from CAN (BatteryShuntData1)
+    if (g_batt_shunt1_updated) {
+        g_batt_shunt1_updated = false;
+        lv_label_set_text_fmt(objects.label_battery_voltage, "%d.%02d",
+            (int)g_batt_voltage_whole, (int)g_batt_voltage_dec);
+        int soc = (int)g_batt_soc_whole;
+        lv_label_set_text_fmt(objects.label_power_battery_percentage, "%d", soc);
+        lv_bar_set_value(objects.bar_battery_soc, soc, LV_ANIM_OFF);
+    }
+
+    // Update wattage consumption and time remaining from CAN (BatteryShuntData2)
+    if (g_batt_shunt2_updated) {
+        g_batt_shunt2_updated = false;
+
+        // Wattage (with sign)
+        int watts = (int)g_shunt_wattage;
+        if (g_is_wattage_negative == 0xFF) watts = -watts;
+        lv_label_set_text_fmt(objects.label_shunt_current_watts_used, "%d", watts);
+
+        // Time to go (minutes → hours for display)
+        uint16_t ttg = g_time_to_go_min;
+        if (ttg == 0xFFFF || ttg == 0) {
+            lv_label_set_text(objects.label_power_remaining_time_to_go_value, "-");
+            lv_label_set_text(objects.label_time_to_go_measurement_type, "");
+        } else {
+            int hours = ttg / 60;
+            int mins = ttg % 60;
+            lv_label_set_text_fmt(objects.label_power_remaining_time_to_go_value,
+                "%d:%02d", hours, mins);
+            lv_label_set_text(objects.label_time_to_go_measurement_type, "Hrs");
+        }
+        // Update the arc (range 0-2000, value in minutes, cap at 2000)
+        int arc_val = (ttg > 2000) ? 2000 : (int)ttg;
+        lv_arc_set_value(objects.power_arc_remaining_hours, arc_val);
+    }
+
+    // Update solar wattage and charge mode from CAN (SolarMpptData1)
+    if (g_solar_mppt1_updated) {
+        g_solar_mppt1_updated = false;
+        lv_label_set_text_fmt(objects.label_solar_wattage, "%d", (int)g_solar_wattage);
+
+        // Victron MPPT charge status: 0=Off, 2=Fault, 3=Bulk, 4=Absorption, 5=Float
+        const char *charge_str;
+        switch (g_solar_charge_status) {
+            case 0: charge_str = "Off";         break;
+            case 2: charge_str = "Fault";       break;
+            case 3: charge_str = "Bulk";        break;
+            case 4: charge_str = "Absorption";  break;
+            case 5: charge_str = "Float";       break;
+            default: charge_str = "Unknown";    break;
+        }
+        lv_label_set_text(objects.label_curent_charge_mode, charge_str);
     }
 
     // Save settings to NVM when changed

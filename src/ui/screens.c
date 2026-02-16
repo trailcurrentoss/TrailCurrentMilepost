@@ -1041,9 +1041,9 @@ void create_screen_page_power_management() {
                     lv_label_set_text(obj, "\uf5ba");
                 }
                 {
-                    // LabelRemainingCacpity_2
+                    // LabelSolarWattage
                     lv_obj_t *obj = lv_label_create(parent_obj);
-                    objects.label_remaining_cacpity_2 = obj;
+                    objects.label_solar_wattage = obj;
                     lv_obj_set_pos(obj, 0, 0);
                     lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
                     add_style_label_default(obj);
@@ -1074,9 +1074,9 @@ void create_screen_page_power_management() {
             {
                 lv_obj_t *parent_obj = obj;
                 {
-                    // LabelSolarStatus
+                    // LabelCurentChargeMode
                     lv_obj_t *obj = lv_label_create(parent_obj);
-                    objects.label_solar_status = obj;
+                    objects.label_curent_charge_mode = obj;
                     lv_obj_set_pos(obj, 43, -1);
                     lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
                     add_style_label_nav_text_alternate(obj);
@@ -1364,9 +1364,9 @@ void create_screen_page_power_management() {
                     }
                 }
                 {
-                    // LabelRemainingCacpity_1
+                    // LabelShuntCurrentWattsUsed
                     lv_obj_t *obj = lv_label_create(parent_obj);
-                    objects.label_remaining_cacpity_1 = obj;
+                    objects.label_shunt_current_watts_used = obj;
                     lv_obj_set_pos(obj, -50, -5);
                     lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
                     add_style_label_default(obj);
@@ -2482,7 +2482,7 @@ void change_color_theme(uint32_t theme_index) {
     
     lv_obj_set_style_bg_color(objects.panel_charge_type, lv_color_hex(theme_colors[theme_index][5]), LV_PART_MAIN | LV_STATE_DEFAULT);
     
-    lv_obj_set_style_text_color(objects.label_solar_status, lv_color_hex(theme_colors[theme_index][7]), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(objects.label_curent_charge_mode, lv_color_hex(theme_colors[theme_index][7]), LV_PART_MAIN | LV_STATE_DEFAULT);
     
     lv_obj_set_style_bg_color(objects.panel_shore_power, lv_color_hex(theme_colors[theme_index][4]), LV_PART_MAIN | LV_STATE_DEFAULT);
     

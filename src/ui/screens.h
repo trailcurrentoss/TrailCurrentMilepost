@@ -98,9 +98,9 @@ typedef struct _objects_t {
     lv_obj_t *widget_power_management_page_bottom_nav_bar__bottom_nav_bar_button_water;
     lv_obj_t *widget_power_management_page_bottom_nav_bar__bottom_nav_bar_button_settings;
     lv_obj_t *panel_solar_input;
-    lv_obj_t *label_remaining_cacpity_2;
+    lv_obj_t *label_solar_wattage;
     lv_obj_t *panel_charge_type;
-    lv_obj_t *label_solar_status;
+    lv_obj_t *label_curent_charge_mode;
     lv_obj_t *panel_shore_power;
     lv_obj_t *label_power_shore_power_heading;
     lv_obj_t *label_shore_power_connection_status;
@@ -120,7 +120,7 @@ typedef struct _objects_t {
     lv_obj_t *label_time_to_go_measurement_type;
     lv_obj_t *label_power_remaining_time_to_go_value;
     lv_obj_t *label_power_remaining;
-    lv_obj_t *label_remaining_cacpity_1;
+    lv_obj_t *label_shunt_current_watts_used;
     lv_obj_t *widget_air_quality_page_bottom_nav_bar;
     lv_obj_t *widget_air_quality_page_bottom_nav_bar__bottom_nav_bar_button_home;
     lv_obj_t *widget_air_quality_page_bottom_nav_bar__bottom_nav_bar_button_trailer;

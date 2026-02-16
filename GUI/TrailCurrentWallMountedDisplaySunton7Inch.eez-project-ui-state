@@ -1,6 +1,6 @@
 {
   "navigation": {
-    "selectedUserPageObject": "[TrailCurrentWallMountedDisplaySunton7Inch.eez-project]:/userPages/1",
+    "selectedUserPageObject": "[TrailCurrentWallMountedDisplaySunton7Inch.eez-project]:/userPages/2",
     "selectedUserWidgetObject": "[TrailCurrentWallMountedDisplaySunton7Inch.eez-project]:/userWidgets/0",
     "selectedStyleObject": "[TrailCurrentWallMountedDisplaySunton7Inch.eez-project]:/lvglStyles/styles/38",
     "subnavigationSelectedItems": {
@@ -193,17 +193,16 @@
               "type": "tabset",
               "id": "EDITORS",
               "weight": 49.986220347315374,
-              "selected": 2,
               "enableDeleteWhenEmpty": false,
               "enableClose": false,
               "children": [
                 {
                   "type": "tab",
                   "id": "#f0a64a95-90d0-4fb4-bf8c-a92be08dddba",
-                  "name": "PageAirQuality",
+                  "name": "PagePowerManagement",
                   "component": "editor",
                   "config": {
-                    "objectPath": "[TrailCurrentWallMountedDisplaySunton7Inch.eez-project]:/userPages/3",
+                    "objectPath": "[TrailCurrentWallMountedDisplaySunton7Inch.eez-project]:/userPages/2",
                     "permanent": false
                   },
                   "icon": "svg:page"
@@ -264,7 +263,8 @@
                   },
                   "icon": "material:settings"
                 }
-              ]
+              ],
+              "active": true
             },
             {
               "type": "row",
@@ -284,8 +284,7 @@
                       "enableClose": false,
                       "icon": "svg:properties"
                     }
-                  ],
-                  "active": true
+                  ]
                 },
                 {
                   "type": "tabset",
@@ -1467,7 +1466,17 @@
         "0": {
           "0": {},
           "1": {},
-          "4": {}
+          "2": {},
+          "4": {
+            "1": {}
+          },
+          "5": {
+            "1": {
+              "2": {
+                "$selected": true
+              }
+            }
+          }
         }
       },
       "transform": {
