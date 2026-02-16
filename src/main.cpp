@@ -3,9 +3,12 @@
 #include <Arduino_GFX_Library.h>
 #include <Wire.h>
 #include <Preferences.h>
+#include <debug.h>
+#include <TwaiTaskBased.h>
 
 #include "ui/ui.h"
 #include "ui/vars.h"
+#include "ui/styles.h"
 
 // Display resolution
 static const uint16_t SCREEN_WIDTH = 800;
@@ -25,6 +28,22 @@ static uint8_t current_brightness = 64;
 // Screen timeout state
 static unsigned long last_touch_ms = 0;
 static bool screen_timed_out = false;
+
+// CAN bus configuration
+#define CAN_TX 17
+#define CAN_RX 18
+#define CAN_BAUDRATE 500000
+#define CAN_ID_TOGGLE       0x18
+#define CAN_ID_STATUS       0x1B
+#define CAN_ID_TEMPERATURE  0x1F
+
+// Device state received from PDM (updated from CAN RX task)
+volatile uint8_t g_device_pwm[8] = {0};
+volatile bool g_device_status_updated = false;
+
+// Temperature received from TempSensor (CAN ID 0x1F, byte 1 = °F)
+volatile uint8_t g_interior_temp_f = 0;
+volatile bool g_temperature_updated = false;
 
 // Touch configuration
 #define TOUCH_SDA 19
@@ -102,18 +121,18 @@ static void gt911_init() {
     uint8_t cfg;
     gt911_addr = 0x5D;
     if (gt911_read_reg(GT911_CONFIG_START, &cfg, 1)) {
-        Serial.printf("GT911 found at 0x%02X, config version: 0x%02X\n", gt911_addr, cfg);
+        debugf("GT911 found at 0x%02X, config version: 0x%02X\n", gt911_addr, cfg);
         gt911_ready = true;
         return;
     }
     // Try address 0x14
     gt911_addr = 0x14;
     if (gt911_read_reg(GT911_CONFIG_START, &cfg, 1)) {
-        Serial.printf("GT911 found at 0x%02X, config version: 0x%02X\n", gt911_addr, cfg);
+        debugf("GT911 found at 0x%02X, config version: 0x%02X\n", gt911_addr, cfg);
         gt911_ready = true;
         return;
     }
-    Serial.println("GT911 not found at 0x5D or 0x14, touch disabled");
+    debugln("GT911 not found at 0x5D or 0x14, touch disabled");
     gt911_ready = false;
 }
 
@@ -185,11 +204,66 @@ static void lvgl_touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data)
 }
 
 // ============================================================================
+// CAN bus receive callback (runs on Core 0 TWAI RX task)
+// ============================================================================
+static void can_rx_callback(const twai_message_t &msg) {
+    if (msg.identifier == CAN_ID_STATUS && msg.data_length_code == 8) {
+        for (int i = 0; i < 8; i++) {
+            g_device_pwm[i] = msg.data[i];
+        }
+        g_device_status_updated = true;
+    } else if (msg.identifier == CAN_ID_TEMPERATURE && msg.data_length_code >= 2) {
+        g_interior_temp_f = msg.data[1];
+        g_temperature_updated = true;
+    }
+}
+
+// ============================================================================
+// Update device button status indicators from CAN state.
+// Uses the EEZ Studio on/off class styles so theme changes propagate
+// automatically.  The generated change_color_theme() sets an inline
+// text_color on every indicator (DEFAULT state, "off" colour).  We must
+// remove that inline property so the class style wins.
+// force=true re-applies all indicators (call after theme change).
+// ============================================================================
+void update_device_status_indicators(bool force) {
+    static bool prev_on[8] = {false};
+
+    lv_obj_t *indicators[8] = {
+        objects.lbl_device01_status_ind,
+        objects.lbl_device02_status_ind,
+        objects.lbl_device03_status_ind,
+        objects.lbl_device04_status_ind,
+        objects.lbl_device05_status_ind,
+        objects.lbl_device06_status_ind,
+        objects.lbl_device07_status_ind,
+        objects.lbl_device08_status_ind,
+    };
+
+    for (int i = 0; i < 8; i++) {
+        bool is_on = g_device_pwm[i] > 0;
+        if (force || is_on != prev_on[i]) {
+            // Remove inline text_color so the class style takes effect
+            lv_obj_remove_local_style_prop(indicators[i],
+                LV_STYLE_TEXT_COLOR, LV_PART_MAIN | LV_STATE_DEFAULT);
+            if (is_on) {
+                remove_style_style_device_status_ind_off(indicators[i]);
+                add_style_style_device_status_ind_on(indicators[i]);
+            } else {
+                remove_style_style_device_status_ind_on(indicators[i]);
+                add_style_style_device_status_ind_off(indicators[i]);
+            }
+            prev_on[i] = is_on;
+        }
+    }
+}
+
+// ============================================================================
 // LVGL log callback
 // ============================================================================
 #if LV_USE_LOG
 static void lvgl_log_cb(const char *buf) {
-    Serial.printf("[LVGL] %s\n", buf);
+    debugf("[LVGL] %s\n", buf);
     Serial.flush();
 }
 #endif
@@ -199,7 +273,7 @@ static void lvgl_log_cb(const char *buf) {
 // ============================================================================
 void setup() {
     Serial.begin(115200);
-    Serial.println("ESP32-8048S070 starting...");
+    debugln("ESP32-8048S070 starting...");
 
     // Initialize display
     gfx->begin();
@@ -222,7 +296,7 @@ void setup() {
     // Bounce buffers ensure DMA reads from SRAM, not PSRAM, so no contention.
     uint16_t *fb = gfx->getFramebuffer();
     if (!fb) {
-        Serial.println("Failed to get RGB framebuffer!");
+        debugln("Failed to get RGB framebuffer!");
         return;
     }
     uint32_t buf_size = SCREEN_WIDTH * SCREEN_HEIGHT;
@@ -276,7 +350,15 @@ void setup() {
     // Override the fade animation from ui_init with an instant load
     lv_disp_load_scr(objects.page_home);
 
-    Serial.println("UI initialized successfully");
+    // Initialize CAN bus (TWAI) for PDM communication
+    TwaiTaskBased::onReceive(can_rx_callback);
+    if (TwaiTaskBased::begin((gpio_num_t)CAN_TX, (gpio_num_t)CAN_RX, CAN_BAUDRATE)) {
+        debugln("TWAI initialized on TX=17, RX=18 at 500kbps");
+    } else {
+        debugln("TWAI initialization failed!");
+    }
+
+    debugln("UI initialized successfully");
 }
 
 // ============================================================================
@@ -286,6 +368,21 @@ void loop() {
     lv_timer_handler();
     extern enum ScreensEnum get_active_screen_id();
     tick_screen_by_id(get_active_screen_id());
+
+    // Update device button indicators from CAN status
+    if (g_device_status_updated) {
+        g_device_status_updated = false;
+        update_device_status_indicators(false);
+    }
+
+    // Update interior temperature from CAN
+    if (g_temperature_updated) {
+        g_temperature_updated = false;
+        int32_t temp_f = (int32_t)g_interior_temp_f;
+        set_var_current_interior_temperature(temp_f);
+        lv_label_set_text_fmt(objects.label_current_interior_temperature,
+            "%d", (int)temp_f);
+    }
 
     // Save settings to NVM when changed
     if (get_var_user_settings_changed()) {

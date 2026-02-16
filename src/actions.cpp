@@ -4,6 +4,8 @@
  */
 
 #include <lvgl.h>
+#include <debug.h>
+#include <TwaiTaskBased.h>
 #include "ui/actions.h"
 #include "ui/screens.h"
 #include "ui/vars.h"
@@ -104,7 +106,29 @@ void action_change_screen(lv_event_t *e) {
 }
 
 void action_send_device_command(lv_event_t *e) {
-    // TODO: Implement CAN bus device command sending
+    // Ignore events bubbled up from child labels
+    if (lv_event_get_target(e) != lv_event_get_current_target(e)) return;
+
+    // Debounce: ignore rapid repeated taps within 300ms
+    static unsigned long last_send_ms = 0;
+    unsigned long now = millis();
+    if (now - last_send_ms < 300) return;
+    last_send_ms = now;
+
+    int32_t device_num = (int32_t)(intptr_t)lv_event_get_user_data(e);
+    if (device_num < 1 || device_num > 8) return;
+
+    uint8_t channel = (uint8_t)(device_num - 1);
+    twai_message_t msg = {};
+    msg.identifier = 0x18;
+    msg.data_length_code = 1;
+    msg.data[0] = channel;
+
+    if (TwaiTaskBased::send(msg, 0)) {
+        debugf("CAN TX: toggle channel %d\n", channel);
+    } else {
+        debugf("CAN TX failed: channel %d\n", channel);
+    }
 }
 
 void action_change_desired_temperature(lv_event_t *e) {
@@ -140,6 +164,10 @@ void action_change_theme(lv_event_t *e) {
         lv_obj_clear_state(objects.btn_theme_light, LV_STATE_CHECKED);
         lv_obj_add_state(objects.btn_theme_dark, LV_STATE_CHECKED);
     }
+
+    // Re-apply device indicator styles (change_color_theme resets inline colors)
+    extern void update_device_status_indicators(bool force);
+    update_device_status_indicators(true);
 
     // Persist the selection in the variable store
     set_var_selected_theme(theme_index);
