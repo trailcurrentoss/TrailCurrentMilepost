@@ -46,8 +46,10 @@ static bool screen_timed_out = false;
 volatile uint8_t g_device_pwm[8] = {0};
 volatile bool g_device_status_updated = false;
 
-// Temperature received from TempSensor (CAN ID 0x1F, byte 1 = °F)
-volatile uint8_t g_interior_temp_f = 0;
+// Temperature & humidity received from TempSensor (CAN ID 0x1F)
+volatile uint8_t  g_interior_temp_f = 0;   // byte 1: Fahrenheit
+volatile int8_t   g_interior_temp_c = 0;   // byte 0: Celsius
+volatile uint16_t g_humidity_raw = 0;       // bytes 2-3: humidity * 100
 volatile bool g_temperature_updated = false;
 
 // GPS data received from GpsModule (CAN IDs 0x07, 0x08)
@@ -241,8 +243,10 @@ static void can_rx_callback(const twai_message_t &msg) {
             g_device_pwm[i] = msg.data[i];
         }
         g_device_status_updated = true;
-    } else if (msg.identifier == CAN_ID_TEMPERATURE && msg.data_length_code >= 2) {
+    } else if (msg.identifier == CAN_ID_TEMPERATURE && msg.data_length_code >= 4) {
+        g_interior_temp_c = (int8_t)msg.data[0];
         g_interior_temp_f = msg.data[1];
+        g_humidity_raw = ((uint16_t)msg.data[2] << 8) | (uint16_t)msg.data[3];
         g_temperature_updated = true;
     } else if (msg.identifier == CAN_ID_GPS_SAT_SPEED && msg.data_length_code >= 6) {
         // Byte 0 = NumSatellitesUsed, Byte 5 = GnssMode (constellation combo 1-7)
@@ -412,6 +416,11 @@ void setup() {
     // Default all CAN-sourced data labels to "-" until real data arrives
     lv_label_set_text(objects.label_current_interior_temperature, "-");
     lv_label_set_text(objects.label_current_exterior_temperature, "-");
+    lv_label_set_text(objects.label_temp_fahrenheit_value, "-");
+    lv_label_set_text(objects.label_temp_celsius_value, "- \u00b0C");
+    lv_label_set_text(objects.label_humidity_value, "-");
+    lv_arc_set_value(objects.arc_temperature, 0);
+    lv_arc_set_value(objects.arc_humidity, 0);
     lv_label_set_text(objects.label_elevation_value, "-");
     lv_label_set_text(objects.label_number_of_sats_value, "-");
     lv_label_set_text(objects.label_gps_mode_value, "-");
@@ -459,13 +468,29 @@ void loop() {
         lv_label_set_text(objects.lbl_all_on_off, any_on ? "All Off" : "All On");
     }
 
-    // Update interior temperature from CAN
+    // Update temperature and humidity from CAN
     if (g_temperature_updated) {
         g_temperature_updated = false;
+
+        // Fahrenheit — home page thermostat + air quality panel
         int32_t temp_f = (int32_t)g_interior_temp_f;
         set_var_current_interior_temperature(temp_f);
         lv_label_set_text_fmt(objects.label_current_interior_temperature,
             "%d", (int)temp_f);
+        lv_label_set_text_fmt(objects.label_temp_fahrenheit_value, "%d", (int)temp_f);
+        int arc_temp = (temp_f < 0) ? 0 : ((temp_f > 130) ? 130 : (int)temp_f);
+        lv_arc_set_value(objects.arc_temperature, arc_temp);
+
+        // Celsius — air quality panel secondary readout
+        int celsius = (int)g_interior_temp_c;
+        lv_label_set_text_fmt(objects.label_temp_celsius_value, "%d \u00b0C", celsius);
+
+        // Humidity — air quality panel arc + value
+        int hum_whole = g_humidity_raw / 100;
+        int hum_frac  = (g_humidity_raw % 100) / 10;
+        lv_label_set_text_fmt(objects.label_humidity_value, "%d.%d", hum_whole, hum_frac);
+        int arc_hum = (hum_whole > 100) ? 100 : hum_whole;
+        lv_arc_set_value(objects.arc_humidity, arc_hum);
     }
 
     // Update GPS satellite count and GNSS mode from CAN

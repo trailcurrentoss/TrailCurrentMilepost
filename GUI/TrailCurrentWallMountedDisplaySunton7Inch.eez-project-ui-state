@@ -1,6 +1,6 @@
 {
   "navigation": {
-    "selectedUserPageObject": "[TrailCurrentWallMountedDisplaySunton7Inch.eez-project]:/userPages/2",
+    "selectedUserPageObject": "[TrailCurrentWallMountedDisplaySunton7Inch.eez-project]:/userPages/3",
     "selectedUserWidgetObject": "[TrailCurrentWallMountedDisplaySunton7Inch.eez-project]:/userWidgets/0",
     "selectedStyleObject": "[TrailCurrentWallMountedDisplaySunton7Inch.eez-project]:/lvglStyles/styles/38",
     "subnavigationSelectedItems": {
@@ -199,10 +199,10 @@
                 {
                   "type": "tab",
                   "id": "#f0a64a95-90d0-4fb4-bf8c-a92be08dddba",
-                  "name": "PagePowerManagement",
+                  "name": "PageAirQuality",
                   "component": "editor",
                   "config": {
-                    "objectPath": "[TrailCurrentWallMountedDisplaySunton7Inch.eez-project]:/userPages/2",
+                    "objectPath": "[TrailCurrentWallMountedDisplaySunton7Inch.eez-project]:/userPages/3",
                     "permanent": false
                   },
                   "icon": "svg:page"
@@ -1496,13 +1496,17 @@
     "[TrailCurrentWallMountedDisplaySunton7Inch.eez-project]:/userPages/3[flow-state]": {
       "selection": {
         "0": {
-          "0": {}
+          "0": {},
+          "2": {
+            "0": {}
+          },
+          "3": {}
         }
       },
       "transform": {
         "translate": {
           "x": -400,
-          "y": -240
+          "y": -120
         },
         "scale": 0.75
       },

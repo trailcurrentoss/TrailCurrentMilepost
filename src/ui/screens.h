@@ -128,8 +128,16 @@ typedef struct _objects_t {
     lv_obj_t *widget_air_quality_page_bottom_nav_bar__bottom_nav_bar_button_air_quality;
     lv_obj_t *widget_air_quality_page_bottom_nav_bar__bottom_nav_bar_button_water;
     lv_obj_t *widget_air_quality_page_bottom_nav_bar__bottom_nav_bar_button_settings;
+    lv_obj_t *panel_iaq_index;
     lv_obj_t *obj10;
     lv_obj_t *obj11;
+    lv_obj_t *panel_temperature;
+    lv_obj_t *arc_temperature;
+    lv_obj_t *label_temp_fahrenheit_value;
+    lv_obj_t *label_temp_celsius_value;
+    lv_obj_t *panel_humidity;
+    lv_obj_t *arc_humidity;
+    lv_obj_t *label_humidity_value;
     lv_obj_t *widget_water_page_bottom_nav_bar;
     lv_obj_t *widget_water_page_bottom_nav_bar__bottom_nav_bar_button_home;
     lv_obj_t *widget_water_page_bottom_nav_bar__bottom_nav_bar_button_trailer;
