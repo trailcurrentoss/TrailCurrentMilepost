@@ -5,6 +5,7 @@
 #include <Preferences.h>
 #include <debug.h>
 #include <TwaiTaskBased.h>
+#include <OtaUpdate.h>
 
 #include "ui/ui.h"
 #include "ui/vars.h"
@@ -33,6 +34,8 @@ static bool screen_timed_out = false;
 #define CAN_TX 17
 #define CAN_RX 18
 #define CAN_BAUDRATE 500000
+#define CAN_ID_OTA_TRIGGER    0x00
+#define CAN_ID_WIFI_CONFIG    0x01
 #define CAN_ID_GPS_SAT_SPEED  0x07
 #define CAN_ID_GPS_ALTITUDE   0x08
 #define CAN_ID_TOGGLE         0x18
@@ -41,6 +44,19 @@ static bool screen_timed_out = false;
 #define CAN_ID_BATT_SHUNT1    0x23
 #define CAN_ID_BATT_SHUNT2    0x24
 #define CAN_ID_SOLAR_MPPT1    0x2C
+
+// OTA update handler (3-minute timeout)
+// Credentials are loaded from NVS when OTA is triggered; empty here for getHostName() only
+OtaUpdate otaUpdate(180000, "", "");
+
+// WiFi credential reception state (CAN ID 0x01 protocol)
+static volatile bool wifiConfigInProgress = false;
+static uint8_t wifiSsidBuffer[33];       // Max 32 chars + null
+static uint8_t wifiPasswordBuffer[64];   // Max 63 chars + null
+static volatile uint8_t wifiSsidLen = 0;
+static volatile uint8_t wifiPasswordLen = 0;
+static volatile uint8_t wifiSsidReceived = 0;
+static volatile uint8_t wifiPasswordReceived = 0;
 
 // Device state received from PDM (updated from CAN RX task)
 volatile uint8_t g_device_pwm[8] = {0};
@@ -235,9 +251,124 @@ static void lvgl_touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data)
 }
 
 // ============================================================================
+// WiFi credential save (NVS)
+// ============================================================================
+static void saveWifiCredentials(const char* ssid, const char* password) {
+    Preferences prefs;
+    prefs.begin("wifi", false);  // read-write
+    prefs.putString("ssid", ssid);
+    prefs.putString("password", password);
+    prefs.end();
+    debugf("[WiFi] Credentials saved to NVS (SSID: %s)\n", ssid);
+}
+
+// ============================================================================
+// WiFi credential CAN handler (CAN ID 0x01 protocol)
+// Protocol: Start(0x01) → SSID chunks(0x02) → Password chunks(0x03) → End(0x04)
+// Each chunk carries up to 6 data bytes (8-byte CAN frame minus 2-byte header)
+// ============================================================================
+static void handleWifiConfigMessage(const twai_message_t &msg) {
+    uint8_t msgType = msg.data[0];
+
+    switch (msgType) {
+        case 0x01: {  // Start message
+            wifiSsidLen = msg.data[1];
+            wifiPasswordLen = msg.data[2];
+            wifiSsidReceived = 0;
+            wifiPasswordReceived = 0;
+            memset(wifiSsidBuffer, 0, sizeof(wifiSsidBuffer));
+            memset(wifiPasswordBuffer, 0, sizeof(wifiPasswordBuffer));
+            wifiConfigInProgress = true;
+            debugf("[WiFi] Config start: SSID len=%d, Password len=%d\n", wifiSsidLen, wifiPasswordLen);
+            break;
+        }
+
+        case 0x02: {  // SSID chunk
+            if (!wifiConfigInProgress) break;
+            uint8_t dataBytes = msg.data_length_code - 2;
+            uint8_t remaining = wifiSsidLen - wifiSsidReceived;
+            if (dataBytes > remaining) dataBytes = remaining;
+            if (wifiSsidReceived + dataBytes <= 32) {
+                memcpy(wifiSsidBuffer + wifiSsidReceived, &msg.data[2], dataBytes);
+                wifiSsidReceived += dataBytes;
+            }
+            break;
+        }
+
+        case 0x03: {  // Password chunk
+            if (!wifiConfigInProgress) break;
+            uint8_t dataBytes = msg.data_length_code - 2;
+            uint8_t remaining = wifiPasswordLen - wifiPasswordReceived;
+            if (dataBytes > remaining) dataBytes = remaining;
+            if (wifiPasswordReceived + dataBytes <= 63) {
+                memcpy(wifiPasswordBuffer + wifiPasswordReceived, &msg.data[2], dataBytes);
+                wifiPasswordReceived += dataBytes;
+            }
+            break;
+        }
+
+        case 0x04: {  // End message with checksum
+            if (!wifiConfigInProgress) break;
+            wifiConfigInProgress = false;
+
+            uint8_t checksum = 0;
+            for (uint8_t i = 0; i < wifiSsidReceived; i++) checksum ^= wifiSsidBuffer[i];
+            for (uint8_t i = 0; i < wifiPasswordReceived; i++) checksum ^= wifiPasswordBuffer[i];
+
+            if (checksum == msg.data[1] && wifiSsidReceived == wifiSsidLen && wifiPasswordReceived == wifiPasswordLen) {
+                wifiSsidBuffer[wifiSsidReceived] = '\0';
+                wifiPasswordBuffer[wifiPasswordReceived] = '\0';
+                saveWifiCredentials((const char*)wifiSsidBuffer, (const char*)wifiPasswordBuffer);
+            } else {
+                debugf("[WiFi] Config failed: checksum %s, SSID %d/%d bytes, Password %d/%d bytes\n",
+                       (checksum == msg.data[1]) ? "OK" : "MISMATCH",
+                       wifiSsidReceived, wifiSsidLen, wifiPasswordReceived, wifiPasswordLen);
+            }
+            break;
+        }
+    }
+}
+
+// ============================================================================
 // CAN bus receive callback (runs on Core 0 TWAI RX task)
 // ============================================================================
 static void can_rx_callback(const twai_message_t &msg) {
+    // OTA trigger message (ID 0x0)
+    if (msg.identifier == CAN_ID_OTA_TRIGGER) {
+        debugln("[OTA] CAN trigger received");
+        char targetHostName[14];
+        String currentHostName = otaUpdate.getHostName();
+        sprintf(targetHostName, "esp32-%02X%02X%02X",
+                msg.data[0], msg.data[1], msg.data[2]);
+
+        debugf("[OTA] Target: %s, Current: %s\n", targetHostName, currentHostName.c_str());
+
+        if (currentHostName.equals(targetHostName)) {
+            debugln("[OTA] Hostname matched - reading WiFi credentials from NVS");
+            Preferences prefs;
+            prefs.begin("wifi", true);  // read-only
+            String ssid = prefs.getString("ssid", "");
+            String password = prefs.getString("password", "");
+            prefs.end();
+
+            if (ssid.length() > 0 && password.length() > 0) {
+                debugf("[OTA] Using stored WiFi credentials (SSID: %s)\n", ssid.c_str());
+                OtaUpdate ota(180000, ssid.c_str(), password.c_str());
+                ota.waitForOta();
+                debugln("[OTA] OTA mode exited - resuming normal operation");
+            } else {
+                debugln("[OTA] ERROR: No WiFi credentials in NVS - cannot start OTA");
+            }
+        }
+        return;
+    }
+
+    // WiFi credential configuration message (ID 0x01)
+    if (msg.identifier == CAN_ID_WIFI_CONFIG) {
+        handleWifiConfigMessage(msg);
+        return;
+    }
+
     if (msg.identifier == CAN_ID_STATUS && msg.data_length_code == 8) {
         for (int i = 0; i < 8; i++) {
             g_device_pwm[i] = msg.data[i];
