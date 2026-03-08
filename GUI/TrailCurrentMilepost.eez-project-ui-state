@@ -1,6 +1,6 @@
 {
   "navigation": {
-    "selectedUserPageObject": "[TrailCurrentWallMountedDisplaySunton7Inch.eez-project]:/userPages/3",
+    "selectedUserPageObject": "[TrailCurrentWallMountedDisplaySunton7Inch.eez-project]:/userPages/0",
     "selectedUserWidgetObject": "[TrailCurrentWallMountedDisplaySunton7Inch.eez-project]:/userWidgets/0",
     "selectedStyleObject": "[TrailCurrentWallMountedDisplaySunton7Inch.eez-project]:/lvglStyles/styles/38",
     "subnavigationSelectedItems": {
@@ -193,6 +193,7 @@
               "type": "tabset",
               "id": "EDITORS",
               "weight": 49.986220347315374,
+              "selected": 3,
               "enableDeleteWhenEmpty": false,
               "enableClose": false,
               "children": [
@@ -1390,17 +1391,15 @@
       "selection": {
         "0": {
           "0": {},
-          "2": {
-            "$selected": true
-          },
+          "2": {},
           "4": {},
           "6": {}
         }
       },
       "transform": {
         "translate": {
-          "x": -400,
-          "y": -240
+          "x": -310,
+          "y": -224
         },
         "scale": 0.75
       },

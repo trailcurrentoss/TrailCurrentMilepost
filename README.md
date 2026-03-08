@@ -1,4 +1,4 @@
-# TrailCurrent Wall Mounted Display (Sunton 7")
+# TrailCurrent Milepost
 
 Touchscreen display firmware for a Sunton ESP32-8048S070 7-inch 800x480 display providing a wall-mounted control panel for the [TrailCurrent](https://trailcurrent.com) modular system.
 
