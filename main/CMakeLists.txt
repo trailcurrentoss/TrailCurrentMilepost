@@ -1,0 +1,27 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "actions.c"
+        "vars.c"
+        "ui/ui.c"
+        "ui/screens.c"
+        "ui/styles.c"
+        "ui/images.c"
+        "ui/ui_font_fa16.c"
+        "ui/ui_font_fa32.c"
+        "ui/ui_font_robot60.c"
+        "ui/ui_image_needle.c"
+        "ui/ui_image_trailer_back.c"
+        "ui/ui_image_trailer_side.c"
+        "ui/ui_image_tuning_background.c"
+        "ui/ui_image_img_chevron_up32px.c"
+    INCLUDE_DIRS
+        "."
+        "ui"
+        "include"
+    REQUIRES
+        driver
+        esp_lcd
+        esp_timer
+        nvs_flash
+)

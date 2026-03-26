@@ -1,0 +1,2 @@
+source /media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/build/bootloader/gdbinit/symbols
+source /media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/build/bootloader/gdbinit/connect
