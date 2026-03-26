@@ -15,10 +15,46 @@
 static const uint16_t SCREEN_WIDTH = 800;
 static const uint16_t SCREEN_HEIGHT = 480;
 
-// Backlight pin and PWM config
-#define TFT_BL 2
-#define BL_LEDC_FREQ    5000
-#define BL_LEDC_BITS    8
+// CH422G IO expander (on GPIO8/9 I2C bus, shared with GT911 touch)
+// The CH422G uses separate I2C addresses for each function (no register addressing):
+//   0x24 = set output-enable mask (1 = output)
+//   0x38 = set output data
+// EXIO1 = Touch RST, EXIO2 = Backlight enable, EXIO5 = CAN_SEL (high = CAN mode)
+#define CH422G_OE_ADDR   0x24   // I2C address: output-enable config
+#define CH422G_OUT_ADDR  0x38   // I2C address: output data
+// Bit positions for each EXIO line
+#define CH422G_EXIO1_BIT  (1 << 1)   // Touch RST
+#define CH422G_EXIO2_BIT  (1 << 2)   // Backlight enable
+#define CH422G_EXIO5_BIT  (1 << 5)   // CAN_SEL (high = CAN, low = USB)
+
+static uint8_t ch422g_out = 0;  // shadow register — tracks current output state
+
+static bool ch422g_write(uint8_t addr, uint8_t val) {
+    Wire.beginTransmission(addr);
+    Wire.write(val);
+    return Wire.endTransmission() == 0;
+}
+
+static void ch422g_set_bit(uint8_t bit, bool high) {
+    if (high) ch422g_out |= bit;
+    else      ch422g_out &= ~bit;
+    ch422g_write(CH422G_OUT_ADDR, ch422g_out);
+}
+
+static void ch422g_init() {
+    // I2C must be started before calling this
+    Wire.begin(8 /* TOUCH_SDA */, 9 /* TOUCH_SCL */);
+    Wire.setClock(400000);
+    // Configure EXIO1/2/5 as outputs; leave others as inputs
+    uint8_t oe = CH422G_EXIO1_BIT | CH422G_EXIO2_BIT | CH422G_EXIO5_BIT;
+    bool ok = ch422g_write(CH422G_OE_ADDR, oe);
+    debugf("CH422G init %s\n", ok ? "OK" : "FAILED");
+    // Initial state: backlight on, CAN_SEL LOW (USB mode — keeps USB CDC alive
+    // for serial monitoring during startup). CAN_SEL is switched high just before
+    // TWAI starts at the end of setup().
+    ch422g_out = CH422G_EXIO2_BIT;   // backlight on, CAN_SEL=0 (USB), touch RST low
+    ch422g_write(CH422G_OUT_ADDR, ch422g_out);
+}
 
 // NVM storage
 Preferences preferences;
@@ -30,9 +66,10 @@ static uint8_t current_brightness = 64;
 static unsigned long last_touch_ms = 0;
 static bool screen_timed_out = false;
 
-// CAN bus configuration
-#define CAN_TX 17
-#define CAN_RX 18
+// CAN bus configuration — onboard CAN transceiver (Waveshare ESP32-S3-Touch-LCD-7)
+// GPIO20 = CANTX, GPIO19 = CANRX (shared with USB; CAN_SEL via CH422G EXIO5 selects mode)
+#define CAN_TX 20
+#define CAN_RX 19
 #define CAN_BAUDRATE 500000
 #define CAN_ID_OTA_TRIGGER    0x00
 #define CAN_ID_WIFI_CONFIG    0x01
@@ -92,23 +129,24 @@ volatile uint16_t g_solar_wattage = 0;
 volatile uint8_t  g_solar_charge_status = 0;
 volatile bool     g_solar_mppt1_updated = false;
 
-// Touch configuration
-#define TOUCH_SDA 19
-#define TOUCH_SCL 20
-#define TOUCH_RST 38
+// Touch configuration — GT911 via I2C on GPIO8 (SDA) / GPIO9 (SCL)
+// Touch RST is via CH422G EXIO1 (pulsed in gt911_init after ch422g_init)
+// Touch IRQ is GPIO4 (not used — driver polls instead)
+#define TOUCH_SDA 8
+#define TOUCH_SCL 9
 // GT911 registers
 #define GT911_POINT_INFO 0x814E
 #define GT911_POINT1     0x8150
 #define GT911_CONFIG_START 0x8047
 
 // ============================================================================
-// Arduino_GFX display configuration for ESP32-8048S070
+// Arduino_GFX display configuration for Waveshare ESP32-S3-Touch-LCD-7
 // ============================================================================
 Arduino_ESP32RGBPanel *rgbpanel = new Arduino_ESP32RGBPanel(
-    41 /* DE */, 40 /* VSYNC */, 39 /* HSYNC */, 42 /* PCLK */,
-    14 /* R0 */, 21 /* R1 */, 47 /* R2 */, 48 /* R3 */, 45 /* R4 */,
-    9 /* G0 */, 46 /* G1 */, 3 /* G2 */, 8 /* G3 */, 16 /* G4 */, 1 /* G5 */,
-    15 /* B0 */, 7 /* B1 */, 6 /* B2 */, 5 /* B3 */, 4 /* B4 */,
+    5  /* DE  */, 3  /* VSYNC */, 46 /* HSYNC */, 7  /* PCLK */,
+    1  /* R0  */, 2  /* R1    */, 42 /* R2    */, 41 /* R3   */, 40 /* R4 */,
+    39 /* G0  */, 0  /* G1    */, 45 /* G2    */, 48 /* G3   */, 47 /* G4 */, 21 /* G5 */,
+    14 /* B0  */, 38 /* B1    */, 18 /* B2    */, 17 /* B3   */, 10 /* B4 */,
     0 /* hsync_polarity */, 210 /* hsync_front_porch */, 30 /* hsync_pulse_width */, 16 /* hsync_back_porch */,
     0 /* vsync_polarity */, 22 /* vsync_front_porch */, 13 /* vsync_pulse_width */, 10 /* vsync_back_porch */,
     1 /* pclk_active_neg */, 16632000 /* prefer_speed ~30fps */,
@@ -151,18 +189,11 @@ static bool gt911_read_reg(uint16_t reg, uint8_t *data, uint8_t len) {
 }
 
 static void gt911_init() {
-    // Hardware reset the GT911 before I2C init
-    // Without INT pin control, GT911 defaults to address 0x5D
-    pinMode(TOUCH_RST, OUTPUT);
-    digitalWrite(TOUCH_RST, LOW);
+    // I2C already started in ch422g_init() — just pulse touch RST via CH422G EXIO1
+    ch422g_set_bit(CH422G_EXIO1_BIT, false);
     delay(10);
-    digitalWrite(TOUCH_RST, HIGH);
+    ch422g_set_bit(CH422G_EXIO1_BIT, true);
     delay(100);
-
-    // Initialize I2C
-    Wire.begin(TOUCH_SDA, TOUCH_SCL);
-    Wire.setClock(400000);
-    delay(50);
 
     // Try address 0x5D first (default when INT pin is floating)
     uint8_t cfg;
@@ -210,11 +241,14 @@ static bool gt911_read_touch(uint16_t *x, uint16_t *y) {
 
 // ============================================================================
 // Backlight control
+// The backlight enable is a digital on/off via CH422G EXIO2 — the panel has
+// no PWM dimming input. Brightness values > 0 turn the backlight on; 0 = off.
+// The brightness value is still stored so the UI slider position is preserved.
 // ============================================================================
 void set_backlight(uint8_t brightness) {
     current_brightness = brightness;
     if (!screen_timed_out) {
-        ledcWrite(TFT_BL, brightness);
+        ch422g_set_bit(CH422G_EXIO2_BIT, brightness > 0);
     }
 }
 
@@ -467,16 +501,21 @@ static void lvgl_log_cb(const char *buf) {
 // ============================================================================
 void setup() {
     Serial.begin(115200);
-    debugln("ESP32-8048S070 starting...");
+    // Wait up to 3s for USB CDC to connect so boot messages aren't lost.
+    // This only blocks during development when a monitor is attached.
+    uint32_t usb_wait = millis();
+    while (!Serial && (millis() - usb_wait) < 3000) delay(10);
+    debugln("Waveshare ESP32-S3-Touch-LCD-7 starting...");
 
     // Initialize display
     gfx->begin();
 
-    // Backlight via PWM
-    ledcAttach(TFT_BL, BL_LEDC_FREQ, BL_LEDC_BITS);
-    ledcWrite(TFT_BL, current_brightness);
+    // Initialize CH422G IO expander: backlight on (EXIO2), touch RST (EXIO1).
+    // CAN_SEL (EXIO5) is left LOW here so USB CDC stays alive for serial logging.
+    // It is switched HIGH just before TWAI starts at the end of setup().
+    ch422g_init();
 
-    // Initialize touch (GT911 via I2C, polling mode)
+    // Initialize touch (GT911 via I2C on GPIO8/9; RST pulsed via CH422G EXIO1)
     gt911_init();
 
     // Initialize LVGL
@@ -522,8 +561,8 @@ void setup() {
     int32_t saved_timeout = preferences.getInt("timeout", 5);
     int32_t saved_theme = preferences.getInt("theme", 0);
 
-    // Apply loaded brightness
-    ledcWrite(TFT_BL, current_brightness);
+    // Apply loaded brightness (on/off via CH422G EXIO2 — no PWM dimming on this panel)
+    set_backlight(current_brightness);
     int slider_pct = map(current_brightness, 0, 255, 0, 100);
     lv_slider_set_value(objects.slider_screen_brightness, slider_pct, LV_ANIM_OFF);
 
@@ -567,10 +606,19 @@ void setup() {
     lv_label_set_text(objects.label_shunt_current_watts_used, "-");
     lv_label_set_text(objects.lbl_all_on_off, "All On");
 
+    // Switch GPIO19/20 from USB to CAN transceiver via CH422G EXIO5, then start TWAI.
+    // All serial logging above this line goes out over USB CDC. After this point,
+    // GPIO19/20 are the CAN bus and USB CDC drops — that is expected.
+    debugln("Switching to CAN mode (USB CDC will disconnect)...");
+    Serial.flush();
+    delay(10);
+    ch422g_set_bit(CH422G_EXIO5_BIT, true);
+    delay(5);  // let the transceiver settle
+
     // Initialize CAN bus (TWAI) for PDM communication
     TwaiTaskBased::onReceive(can_rx_callback);
-    if (TwaiTaskBased::begin((gpio_num_t)CAN_TX, (gpio_num_t)CAN_RX, CAN_BAUDRATE)) {
-        debugln("TWAI initialized on TX=17, RX=18 at 500kbps");
+    if (TwaiTaskBased::begin((gpio_num_t)CAN_TX, (gpio_num_t)CAN_RX, CAN_BAUDRATE, TWAI_MODE_NO_ACK)) {
+        debugln("TWAI initialized on TX=20, RX=19 (onboard transceiver) at 500kbps");
     } else {
         debugln("TWAI initialization failed!");
     }
@@ -724,18 +772,18 @@ void loop() {
             last_touch_ms = millis();
             if (screen_timed_out) {
                 screen_timed_out = false;
-                ledcWrite(TFT_BL, current_brightness);
+                ch422g_set_bit(CH422G_EXIO2_BIT, true);
             }
         }
 
         unsigned long elapsed_ms = millis() - last_touch_ms;
         if (!screen_timed_out && elapsed_ms >= (unsigned long)timeout_min * 60000UL) {
             screen_timed_out = true;
-            ledcWrite(TFT_BL, 0);
+            ch422g_set_bit(CH422G_EXIO2_BIT, false);
         }
     } else if (screen_timed_out) {
         // Timeout was disabled, wake up
         screen_timed_out = false;
-        ledcWrite(TFT_BL, current_brightness);
+        ch422g_set_bit(CH422G_EXIO2_BIT, true);
     }
 }
