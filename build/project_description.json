@@ -1,7 +1,7 @@
 {
     "version":            "1.2",
     "project_name":       "trailcurrent_milepost",
-    "project_version":    "9417bf7-dirty",
+    "project_version":    "6f07be6-dirty",
     "project_path":       "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost",
     "idf_path":           "/home/dave/esp/v5.5.2/esp-idf",
     "build_dir":          "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/build",
