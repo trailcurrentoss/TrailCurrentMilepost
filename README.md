@@ -1,78 +1,98 @@
 # TrailCurrent Milepost
 
-Touchscreen display firmware for a Sunton ESP32-8048S070 7-inch 800x480 display providing a wall-mounted control panel for the [TrailCurrent](https://trailcurrent.com) modular system.
+Touchscreen display firmware for the Waveshare ESP32-S3-Touch-LCD-7 (V1.2) providing a wall-mounted control panel for the [TrailCurrent](https://trailcurrent.com) modular system.
 
-## Hardware Overview
+## Hardware
 
-- **Microcontroller:** ESP32-S3 (16MB Flash, 8MB PSRAM)
-- **Display:** Sunton ESP32-8048S070 - 7" 800x480 RGB TFT with GT911 capacitive touch
-- **Key Features:**
-  - Wall-mounted touchscreen control panel
-  - Thermostat with interior/exterior temperature display
-  - Device control buttons for PDM-connected devices
-  - WiFi network scanning and connection UI
-  - Screen brightness control with PWM backlight
-  - Screen timeout with auto-wake on touch
-  - Theme switching (light/dark)
-  - NVM-persisted user settings
-  - LVGL-based UI designed with EEZ Studio
+- **Board:** Waveshare ESP32-S3-Touch-LCD-7 (V1.2)
+- **MCU:** ESP32-S3-WROOM-1-N16R8 (16MB Flash, 8MB PSRAM)
+- **Display:** 7" 800x480 RGB565 IPS with GT911 capacitive touch
+- **IO Expander:** CH422G (backlight, touch reset, CAN/USB mux, SD CS)
+- **Interfaces:** CAN bus, RS485, I2C, UART, SD card, battery connector
 
-## Hardware Requirements
+## Features
 
-### Components
+- Device control buttons for up to 8 PDM-connected devices
+- Interior temperature, humidity, and thermostat display
+- GPS satellite count, GNSS mode, and elevation
+- Battery SOC, voltage, wattage, and time-to-go
+- Solar MPPT charge status and wattage
+- Software brightness dimming via LVGL overlay
+- Screen timeout with auto-wake on touch
+- Light/dark theme switching
+- NVS-persisted user settings
+- OTA firmware updates triggered over CAN bus
+- OTA rollback protection (auto-reverts bad firmware)
+- LVGL-based UI designed with EEZ Studio
 
-- **Display Module:** Sunton ESP32-8048S070 (7" 800x480 RGB TFT)
-- **Touch Controller:** GT911 (I2C, SDA: GPIO 19, SCL: GPIO 20, RST: GPIO 38)
-- **Backlight:** PWM on GPIO 2
+## Building and Flashing
 
-## Firmware
+Requires ESP-IDF v5.1+ (tested with v5.5.2).
 
-See `src/` directory for PlatformIO-based firmware.
-
-**Setup:**
 ```bash
-# Install PlatformIO (if not already installed)
-pip install platformio
+# First time: set target
+idf.py set-target esp32s3
 
-# Build firmware
-pio run
+# Build
+idf.py build
 
-# Upload to board (serial)
-pio run -t upload
+# Flash via CH343 UART port (top USB-C, labeled UART1)
+idf.py -p /dev/ttyACM0 flash
+
+# Monitor serial output
+idf.py -p /dev/ttyACM0 monitor
 ```
 
-### Firmware Dependencies
+Dependencies (LVGL 8.4, GT911 touch driver) are resolved automatically from the ESP Component Registry on first build.
 
-All dependencies are automatically resolved by PlatformIO during the build process:
+## OTA Updates
 
-- **[LVGL](https://github.com/lvgl/lvgl)** (v8.4.0) - Light and Versatile Graphics Library
-- **[GFX Library for Arduino](https://github.com/moononournation/Arduino_GFX)** (v1.4.0+) - Display driver
+OTA is triggered via CAN bus message ID `0x00` containing the target device's MAC bytes [3,4,5]. The device connects to WiFi (credentials stored in NVS via CAN ID `0x01`), starts an HTTP server on port 3232, and waits up to 180 seconds for a firmware upload.
 
-### Display Rendering
-
-The firmware uses LVGL direct mode with zero-copy rendering into the RGB panel's DMA framebuffer for optimal performance. Bounce buffers ensure DMA reads from SRAM instead of PSRAM.
+```bash
+curl -X POST --data-binary @build/trailcurrent_milepost.bin http://<device-ip>:3232/update
+```
 
 ## Project Structure
 
 ```
-├── GUI/                          # EEZ Studio UI design files
-├── include/                      # Header files
-│   ├── lv_conf.h                 # LVGL configuration
-│   └── bsp/                      # Board support package headers
-├── src/                          # Firmware source
-│   ├── main.cpp                  # Display, touch, and LVGL initialization
-│   ├── actions.cpp               # UI action callbacks
-│   ├── vars.cpp                  # UI variable bindings
-│   └── ui/                       # EEZ Studio generated UI code
-├── lib/                          # Local libraries
-├── platformio.ini                # Build configuration
-└── partitions.csv                # ESP32 flash partition layout (16MB)
+TrailCurrentMilepost/
+├── CMakeLists.txt              # ESP-IDF root project file
+├── sdkconfig.defaults          # Build configuration defaults
+├── partitions.csv              # Flash partition layout (dual OTA slots)
+├── main/
+│   ├── CMakeLists.txt          # Component source and dependency list
+│   ├── idf_component.yml       # ESP Component Registry dependencies
+│   ├── main.c                  # Hardware init, display, CAN RX, UI loop
+│   ├── actions.c               # UI action callbacks (button presses, etc.)
+│   ├── vars.c                  # UI variable getters/setters
+│   ├── ota.c                   # OTA update module (WiFi, HTTP server, flash)
+│   ├── include/
+│   │   ├── ota.h               # OTA public API
+│   │   └── bsp/                # Shim headers for EEZ Studio compatibility
+│   └── ui/                     # EEZ Studio generated UI code (do not edit)
+├── GUI/
+│   ├── TrailCurrentMilepost.eez-project       # UI design source file
+│   └── TrailCurrentMilepost.eez-project-ui-state
+└── DOCS/
+    └── board-setup-guide.md    # Hardware setup and pin reference
 ```
+
+## CAN Bus Protocol
+
+| CAN ID | Direction | Description |
+|--------|-----------|-------------|
+| 0x00   | RX        | OTA trigger (bytes 0-2: target MAC[3:5]) |
+| 0x01   | RX        | WiFi credential provisioning (multi-frame) |
+| 0x07   | RX        | GPS satellite count and GNSS mode |
+| 0x08   | RX        | GPS altitude |
+| 0x18   | TX/RX     | Device toggle commands / status |
+| 0x1B   | RX        | Device PWM status (8 channels) |
+| 0x1F   | RX        | Temperature and humidity |
+| 0x23   | RX        | Battery voltage and SOC |
+| 0x24   | RX        | Battery wattage and time-to-go |
+| 0x2C   | RX        | Solar MPPT wattage and charge status |
 
 ## License
 
 MIT License - See LICENSE file for details.
-
-## Contributing
-
-Improvements and contributions are welcome! Please submit issues or pull requests.
