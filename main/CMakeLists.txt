@@ -3,6 +3,7 @@ idf_component_register(
         "main.c"
         "actions.c"
         "vars.c"
+        "ota.c"
         "ui/ui.c"
         "ui/screens.c"
         "ui/styles.c"
@@ -24,4 +25,8 @@ idf_component_register(
         esp_lcd
         esp_timer
         nvs_flash
+        esp_wifi
+        esp_http_server
+        app_update
+        esp_netif
 )

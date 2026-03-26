@@ -1,7 +1,7 @@
 {
     "version":            "1.2",
     "project_name":       "trailcurrent_milepost",
-    "project_version":    "6f07be6-dirty",
+    "project_version":    "ea3ff74-dirty",
     "project_path":       "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost",
     "idf_path":           "/home/dave/esp/v5.5.2/esp-idf",
     "build_dir":          "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/build",
@@ -1265,12 +1265,12 @@
             "dir": "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main",
             "type": "LIBRARY",
             "lib": "__idf_main",
-            "reqs": [ "driver", "esp_lcd", "esp_timer", "nvs_flash", "lvgl__lvgl" ],
+            "reqs": [ "driver", "esp_lcd", "esp_timer", "nvs_flash", "esp_wifi", "esp_http_server", "app_update", "esp_netif", "lvgl__lvgl" ],
             "priv_reqs": [ "espressif__esp_lcd_touch_gt911" ],
             "managed_reqs": [ "lvgl__lvgl" ],
             "managed_priv_reqs": [ "espressif__esp_lcd_touch_gt911" ],
             "file": "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/build/esp-idf/main/libmain.a",
-            "sources": [ "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/main.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/actions.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/vars.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/ui/ui.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/ui/screens.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/ui/styles.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/ui/images.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/ui/ui_font_fa16.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/ui/ui_font_fa32.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/ui/ui_font_robot60.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/ui/ui_image_needle.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/ui/ui_image_trailer_back.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/ui/ui_image_trailer_side.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/ui/ui_image_tuning_background.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/ui/ui_image_img_chevron_up32px.c" ],
+            "sources": [ "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/main.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/actions.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/vars.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/ota.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/ui/ui.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/ui/screens.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/ui/styles.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/ui/images.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/ui/ui_font_fa16.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/ui/ui_font_fa32.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/ui/ui_font_robot60.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/ui/ui_image_needle.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/ui/ui_image_trailer_back.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/ui/ui_image_trailer_side.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/ui/ui_image_tuning_background.c", "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main/ui/ui_image_img_chevron_up32px.c" ],
             "include_dirs": [ ".", "ui", "include" ]
         },
         "mbedtls": {
@@ -2967,7 +2967,7 @@
             "prefix": "idf",
             "dir": "/media/dave/extstorage/TrailCurrent/Product/TrailCurrentMilepost/main",
             "lib": "__idf_main",
-            "reqs": [ "driver", "esp_lcd", "esp_timer", "nvs_flash", "lvgl__lvgl" ],
+            "reqs": [ "driver", "esp_lcd", "esp_timer", "nvs_flash", "esp_wifi", "esp_http_server", "app_update", "esp_netif", "lvgl__lvgl" ],
             "priv_reqs": [ "espressif__esp_lcd_touch_gt911" ],
             "managed_reqs": [ "lvgl__lvgl" ],
             "managed_priv_reqs": [ "espressif__esp_lcd_touch_gt911" ],

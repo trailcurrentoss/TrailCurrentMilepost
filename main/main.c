@@ -11,9 +11,11 @@
 #include "driver/twai.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "esp_ota_ops.h"
 #include "lvgl.h"
 
 #include "ui/ui.h"
+#include "include/ota.h"
 #include "ui/vars.h"
 #include "ui/styles.h"
 
@@ -451,6 +453,11 @@ static void can_rx_task(void *arg)
     while (1) {
         if (twai_receive(&msg, pdMS_TO_TICKS(100)) != ESP_OK) continue;
 
+        if (msg.identifier == CAN_ID_OTA_TRIGGER) {
+            ota_check_can_trigger(&msg);
+            continue;
+        }
+
         if (msg.identifier == CAN_ID_WIFI_CONFIG) {
             handle_wifi_config_msg(&msg);
             continue;
@@ -708,11 +715,17 @@ void app_main(void)
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(nvs_open("settings", NVS_READWRITE, &nvs_settings));
 
+    // OTA init (reads MAC for CAN trigger matching)
+    ota_init();
+
     // Hardware init
     lcd_init();
     ch422g_init();
     touch_init();
     lvgl_init();
+
+    // Confirm firmware is good (OTA rollback protection)
+    esp_ota_mark_app_valid_cancel_rollback();
 
     // EEZ Studio UI
     ui_init();
@@ -781,6 +794,7 @@ void app_main(void)
         tick_screen_by_id(get_active_screen_id());
         update_ui_from_can();
         handle_screen_timeout();
+        ota_process();
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
