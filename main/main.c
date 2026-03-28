@@ -449,7 +449,7 @@ static void can_init(void)
     if (twai_driver_install(&g_config, &t_config, &f_config) == ESP_OK &&
         twai_start() == ESP_OK) {
         ESP_LOGI(TAG, "TWAI started on TX=%d RX=%d at 500kbps", CAN_TX_PIN, CAN_RX_PIN);
-        xTaskCreatePinnedToCore(can_rx_task, "can_rx", 4096, NULL, 5, NULL, 0);
+        xTaskCreatePinnedToCore(can_rx_task, "can_rx", 4096, NULL, 5, NULL, 1);
     } else {
         ESP_LOGE(TAG, "TWAI initialization failed");
     }
