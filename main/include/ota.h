@@ -1,17 +1,33 @@
-#ifndef OTA_H
-#define OTA_H
+#pragma once
 
-#include "driver/twai.h"
+#include <stdint.h>
+#include <stdbool.h>
 
-// Call once from app_main() after nvs_flash_init() to read device MAC
+// OTA update window duration (3 minutes)
+#define OTA_TIMEOUT_MS 180000
+
+/**
+ * Initialize OTA subsystem.
+ * Must be called after wifi_config_init().
+ */
 void ota_init(void);
 
-// Call from CAN RX task when CAN ID 0x00 is received.
-// Compares MAC bytes in message to this device — sets trigger flag on match.
-void ota_check_can_trigger(const twai_message_t *msg);
+/**
+ * Handle a CAN OTA trigger message (ID 0x00).
+ * Compares MAC bytes in data[0..2] against this device's MAC.
+ * If matched, enters OTA mode: connects WiFi, starts HTTP server,
+ * waits for firmware upload or timeout, then disconnects and returns.
+ */
+void ota_handle_trigger(const uint8_t *data, uint8_t len);
 
-// Call from main loop each iteration. Non-blocking state machine that manages
-// WiFi connect, HTTP server, OTA flash, LVGL status overlay, and cleanup.
-void ota_process(void);
+/**
+ * Check whether OTA is currently in progress.
+ * Used by discovery to enforce mutual exclusion.
+ */
+bool ota_is_running(void);
 
-#endif // OTA_H
+/**
+ * Call from main loop to update LVGL overlay during OTA.
+ * Must only be called from the LVGL thread (main loop).
+ */
+void ota_update_ui(void);

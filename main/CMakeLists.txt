@@ -4,6 +4,8 @@ idf_component_register(
         "actions.c"
         "vars.c"
         "ota.c"
+        "discovery.c"
+        "wifi_config.c"
         "ui/ui.c"
         "ui/screens.c"
         "ui/styles.c"
@@ -29,4 +31,5 @@ idf_component_register(
         esp_http_server
         app_update
         esp_netif
+        esp_app_format
 )

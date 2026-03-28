@@ -9,13 +9,14 @@
 #include "esp_timer.h"
 #include "driver/i2c.h"
 #include "driver/twai.h"
-#include "nvs_flash.h"
 #include "nvs.h"
 #include "esp_ota_ops.h"
 #include "lvgl.h"
 
 #include "ui/ui.h"
 #include "include/ota.h"
+#include "include/discovery.h"
+#include "include/wifi_config.h"
 #include "ui/vars.h"
 #include "ui/styles.h"
 
@@ -328,9 +329,10 @@ static void lvgl_init(void)
 #define CAN_RX_PIN           19
 #define CAN_BAUDRATE_KBPS    500
 
-#define CAN_ID_OTA_TRIGGER   0x00
-#define CAN_ID_WIFI_CONFIG   0x01
-#define CAN_ID_GPS_SAT_SPEED 0x07
+#define CAN_ID_OTA_TRIGGER        0x00
+#define CAN_ID_WIFI_CONFIG        0x01
+#define CAN_ID_DISCOVERY_TRIGGER  0x02
+#define CAN_ID_GPS_SAT_SPEED      0x07
 #define CAN_ID_GPS_ALTITUDE  0x08
 #define CAN_ID_TOGGLE        0x18
 #define CAN_ID_STATUS        0x1B
@@ -373,79 +375,6 @@ volatile uint16_t g_solar_wattage = 0;
 volatile uint8_t  g_solar_charge_status = 0;
 volatile bool     g_solar_mppt1_updated = false;
 
-// WiFi credential reception state (CAN ID 0x01)
-static volatile bool wifi_config_in_progress = false;
-static uint8_t wifi_ssid_buf[33];
-static uint8_t wifi_pass_buf[64];
-static volatile uint8_t wifi_ssid_len = 0;
-static volatile uint8_t wifi_pass_len = 0;
-static volatile uint8_t wifi_ssid_received = 0;
-static volatile uint8_t wifi_pass_received = 0;
-
-static void save_wifi_credentials(const char *ssid, const char *password)
-{
-    nvs_handle_t h;
-    if (nvs_open("wifi", NVS_READWRITE, &h) == ESP_OK) {
-        nvs_set_str(h, "ssid", ssid);
-        nvs_set_str(h, "password", password);
-        nvs_commit(h);
-        nvs_close(h);
-        ESP_LOGI(TAG, "WiFi credentials saved (SSID: %s)", ssid);
-    }
-}
-
-static void handle_wifi_config_msg(const twai_message_t *msg)
-{
-    uint8_t type = msg->data[0];
-    switch (type) {
-    case 0x01: {
-        wifi_ssid_len = msg->data[1];
-        wifi_pass_len = msg->data[2];
-        wifi_ssid_received = 0;
-        wifi_pass_received = 0;
-        memset(wifi_ssid_buf, 0, sizeof(wifi_ssid_buf));
-        memset(wifi_pass_buf, 0, sizeof(wifi_pass_buf));
-        wifi_config_in_progress = true;
-        break;
-    }
-    case 0x02: {
-        if (!wifi_config_in_progress) break;
-        uint8_t n = msg->data_length_code - 2;
-        uint8_t rem = wifi_ssid_len - wifi_ssid_received;
-        if (n > rem) n = rem;
-        if (wifi_ssid_received + n <= 32) {
-            memcpy(wifi_ssid_buf + wifi_ssid_received, &msg->data[2], n);
-            wifi_ssid_received += n;
-        }
-        break;
-    }
-    case 0x03: {
-        if (!wifi_config_in_progress) break;
-        uint8_t n = msg->data_length_code - 2;
-        uint8_t rem = wifi_pass_len - wifi_pass_received;
-        if (n > rem) n = rem;
-        if (wifi_pass_received + n <= 63) {
-            memcpy(wifi_pass_buf + wifi_pass_received, &msg->data[2], n);
-            wifi_pass_received += n;
-        }
-        break;
-    }
-    case 0x04: {
-        if (!wifi_config_in_progress) break;
-        wifi_config_in_progress = false;
-        uint8_t checksum = 0;
-        for (uint8_t i = 0; i < wifi_ssid_received; i++) checksum ^= wifi_ssid_buf[i];
-        for (uint8_t i = 0; i < wifi_pass_received; i++) checksum ^= wifi_pass_buf[i];
-        if (checksum == msg->data[1] && wifi_ssid_received == wifi_ssid_len &&
-            wifi_pass_received == wifi_pass_len) {
-            wifi_ssid_buf[wifi_ssid_received] = '\0';
-            wifi_pass_buf[wifi_pass_received] = '\0';
-            save_wifi_credentials((const char *)wifi_ssid_buf, (const char *)wifi_pass_buf);
-        }
-        break;
-    }
-    }
-}
 
 static void can_rx_task(void *arg)
 {
@@ -454,12 +383,17 @@ static void can_rx_task(void *arg)
         if (twai_receive(&msg, pdMS_TO_TICKS(100)) != ESP_OK) continue;
 
         if (msg.identifier == CAN_ID_OTA_TRIGGER) {
-            ota_check_can_trigger(&msg);
+            ota_handle_trigger(msg.data, msg.data_length_code);
             continue;
         }
 
         if (msg.identifier == CAN_ID_WIFI_CONFIG) {
-            handle_wifi_config_msg(&msg);
+            wifi_config_handle_can(msg.data, msg.data_length_code);
+            continue;
+        }
+
+        if (msg.identifier == CAN_ID_DISCOVERY_TRIGGER) {
+            discovery_handle_trigger();
             continue;
         }
 
@@ -711,12 +645,14 @@ static void update_ui_from_can(void)
 // ============================================================================
 void app_main(void)
 {
-    // NVS
-    ESP_ERROR_CHECK(nvs_flash_init());
+    // WiFi config (handles NVS flash init and hostname from MAC)
+    ESP_ERROR_CHECK(wifi_config_init());
+    wifi_config_load();
     ESP_ERROR_CHECK(nvs_open("settings", NVS_READWRITE, &nvs_settings));
 
-    // OTA init (reads MAC for CAN trigger matching)
+    // OTA & Discovery init
     ota_init();
+    discovery_init();
 
     // Hardware init
     lcd_init();
@@ -794,7 +730,9 @@ void app_main(void)
         tick_screen_by_id(get_active_screen_id());
         update_ui_from_can();
         handle_screen_timeout();
-        ota_process();
+        ota_update_ui();
+        discovery_update_ui();
+        wifi_config_check_timeout();
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
