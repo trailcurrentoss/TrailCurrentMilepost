@@ -3,6 +3,8 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "esp_log.h"
+#include "esp_app_desc.h"
+#include "esp_mac.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_rgb.h"
 #include "esp_lcd_touch_gt911.h"
@@ -449,6 +451,23 @@ static void can_init(void)
     if (twai_driver_install(&g_config, &t_config, &f_config) == ESP_OK &&
         twai_start() == ESP_OK) {
         ESP_LOGI(TAG, "TWAI started on TX=%d RX=%d at 500kbps", CAN_TX_PIN, CAN_RX_PIN);
+
+        // Broadcast firmware version on CAN 0x04 at startup
+        {
+            uint8_t mac[6];
+            esp_read_mac(mac, ESP_MAC_WIFI_STA);
+            const esp_app_desc_t *app = esp_app_get_description();
+            unsigned maj = 0, min = 0, pat = 0;
+            sscanf(app->version, "%u.%u.%u", &maj, &min, &pat);
+            twai_message_t ver_msg = {
+                .identifier = 0x04,
+                .data_length_code = 6,
+                .data = { mac[3], mac[4], mac[5], maj, min, pat }
+            };
+            twai_transmit(&ver_msg, pdMS_TO_TICKS(50));
+            ESP_LOGI(TAG, "Version broadcast: %s (CAN 0x04)", app->version);
+        }
+
         xTaskCreatePinnedToCore(can_rx_task, "can_rx", 4096, NULL, 5, NULL, 1);
     } else {
         ESP_LOGE(TAG, "TWAI initialization failed");

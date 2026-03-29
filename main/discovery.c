@@ -55,8 +55,6 @@ static void discovery_mdns_start(void)
 
     mdns_txt_item_t txt[] = {
         { "type",  MODULE_TYPE },
-        { "addr",  "0" },
-        { "canid", "0x18" },
         { "fw",    app->version },
     };
 
