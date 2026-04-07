@@ -1,6 +1,6 @@
 {
   "navigation": {
-    "selectedUserPageObject": "[TrailCurrentMilepost.eez-project]:/userPages/0",
+    "selectedUserPageObject": "[TrailCurrentMilepost.eez-project]:/userPages/5",
     "selectedUserWidgetObject": "[TrailCurrentMilepost.eez-project]:/userWidgets/0",
     "selectedStyleObject": "[TrailCurrentMilepost.eez-project]:/lvglStyles/styles/38",
     "subnavigationSelectedItems": {
@@ -193,16 +193,29 @@
               "type": "tabset",
               "id": "EDITORS",
               "weight": 49.986220347315374,
+              "selected": 1,
               "enableDeleteWhenEmpty": false,
               "enableClose": false,
               "children": [
                 {
                   "type": "tab",
-                  "id": "#c596489a-f66d-42ea-96fe-e1fcd7b68cb6",
-                  "name": "PageHome",
+                  "id": "#ba8a43b2-d7f7-4038-8d15-995cc3aba1d7",
+                  "name": "Settings",
                   "component": "editor",
                   "config": {
-                    "objectPath": "[TrailCurrentMilepost.eez-project]:/userPages/0",
+                    "objectPath": "[TrailCurrentMilepost.eez-project]:/settings",
+                    "subObjectPath": "[TrailCurrentMilepost.eez-project]:/settings",
+                    "permanent": false
+                  },
+                  "icon": "material:settings"
+                },
+                {
+                  "type": "tab",
+                  "id": "#c596489a-f66d-42ea-96fe-e1fcd7b68cb6",
+                  "name": "PageSettings",
+                  "component": "editor",
+                  "config": {
+                    "objectPath": "[TrailCurrentMilepost.eez-project]:/userPages/5",
                     "permanent": false
                   },
                   "icon": "svg:page"
@@ -218,8 +231,7 @@
                   },
                   "icon": "svg:user_widget"
                 }
-              ],
-              "active": true
+              ]
             },
             {
               "type": "row",
@@ -239,7 +251,8 @@
                       "enableClose": false,
                       "icon": "svg:properties"
                     }
-                  ]
+                  ],
+                  "active": true
                 },
                 {
                   "type": "tabset",
@@ -1550,7 +1563,11 @@
     },
     "[TrailCurrentMilepost.eez-project]:/userPages/0[flow-state]": {
       "selection": {
-        "0": {}
+        "0": {
+          "6": {
+            "$selected": true
+          }
+        }
       },
       "transform": {
         "translate": {
@@ -1568,7 +1585,11 @@
     },
     "[TrailCurrentMilepost.eez-project]:/userPages/1[flow-state]": {
       "selection": {
-        "0": {}
+        "0": {
+          "0": {
+            "$selected": true
+          }
+        }
       },
       "transform": {
         "translate": {
