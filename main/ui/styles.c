@@ -1591,8 +1591,8 @@ void remove_style_style_panel_modal_blocker(lv_obj_t *obj) {
 
 void init_style_style_panel_nav_bar_bottom_MAIN_DEFAULT(lv_style_t *style) {
     lv_style_set_align(style, LV_ALIGN_BOTTOM_LEFT);
-    lv_style_set_min_width(style, 800);
-    lv_style_set_max_width(style, 800);
+    lv_style_set_min_width(style, 1024);
+    lv_style_set_max_width(style, 1024);
     lv_style_set_min_height(style, 60);
     lv_style_set_max_height(style, 60);
     lv_style_set_pad_top(style, 0);

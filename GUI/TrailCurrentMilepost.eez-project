@@ -11,8 +11,8 @@
       "extensions": [],
       "imports": [],
       "flowSupport": false,
-      "displayWidth": 800,
-      "displayHeight": 480,
+      "displayWidth": 1024,
+      "displayHeight": 600,
       "displayBorderRadius": 0,
       "darkTheme": false,
       "colorFormat": "BGR",
@@ -91,7 +91,7 @@
           "template": "#if defined(EEZ_FOR_LVGL)\n#include <eez/core/vars.h>\n#endif\n\n#include \"ui.h\"\n#include \"screens.h\"\n#include \"images.h\"\n#include \"actions.h\"\n#include \"vars.h\"\n\n//${eez-studio GUI_ASSETS_DEF}\n\n//${eez-studio LVGL_NATIVE_VARS_TABLE_DEF}\n\n//${eez-studio LVGL_ACTIONS_ARRAY_DEF}\n\n#if defined(EEZ_FOR_LVGL)\n\nvoid ui_init() {\n    eez_flow_init(assets, sizeof(assets), (lv_obj_t **)&objects, sizeof(objects), images, sizeof(images), actions);\n}\n\nvoid ui_tick() {\n    eez_flow_tick();\n    tick_screen(g_currentScreen);\n}\n\n#else\n\n#include <string.h>\n\nstatic int16_t currentScreen = -1;\n\nstatic lv_obj_t *getLvglObjectFromIndex(int32_t index) {\n    if (index == -1) {\n        return 0;\n    }\n    return ((lv_obj_t **)&objects)[index];\n}\n\nvoid loadScreen(enum ScreensEnum screenId) {\n    currentScreen = screenId - 1;\n    lv_obj_t *screen = getLvglObjectFromIndex(currentScreen);\n    lv_scr_load_anim(screen, LV_SCR_LOAD_ANIM_FADE_IN, 200, 0, false);\n}\n\nvoid ui_init() {\n    create_screens();\n//${eez-studio LVGL_LOAD_FIRST_SCREEN}\n}\n\nvoid ui_tick() {\n    tick_screen(currentScreen);\n}\n\n#endif\n"
         }
       ],
-      "destinationFolder": "../src/ui",
+      "destinationFolder": "../main/ui",
       "separateFolderForImagesAndFonts": false,
       "imageExportMode": "source",
       "fontExportMode": "source",
@@ -523,58 +523,6 @@
           "widthUnit": "px",
           "heightUnit": "px",
           "children": [
-            {
-              "objID": "a5889d2e-56e0-420d-ca22-efc2ddd7983b",
-              "type": "LVGLUserWidgetWidget",
-              "left": 0,
-              "top": 0,
-              "width": 800,
-              "height": 60,
-              "customInputs": [],
-              "customOutputs": [],
-              "style": {
-                "objID": "653ba824-3836-40c1-8de5-98ec4e1b0e5e",
-                "useStyle": "default",
-                "conditionalStyles": [],
-                "childStyles": []
-              },
-              "timeline": [],
-              "eventHandlers": [],
-              "identifier": "WidgetHomePageBottomNavBar",
-              "leftUnit": "px",
-              "topUnit": "px",
-              "widthUnit": "px",
-              "heightUnit": "px",
-              "children": [],
-              "widgetFlags": "CLICK_FOCUSABLE|GESTURE_BUBBLE|PRESS_LOCK|SCROLLABLE|SCROLL_CHAIN_HOR|SCROLL_CHAIN_VER|SCROLL_ELASTIC|SCROLL_MOMENTUM|SCROLL_WITH_ARROW|SNAPPABLE",
-              "hiddenFlagType": "literal",
-              "clickableFlag": true,
-              "clickableFlagType": "literal",
-              "flagScrollbarMode": "",
-              "flagScrollDirection": "",
-              "scrollSnapX": "",
-              "scrollSnapY": "",
-              "checkedStateType": "literal",
-              "disabledStateType": "literal",
-              "states": "",
-              "localStyles": {
-                "objID": "d1c976e7-a0c7-4e1f-d255-bcc18d7814d1",
-                "definition": {
-                  "MAIN": {
-                    "DEFAULT": {
-                      "align": "BOTTOM_LEFT"
-                    }
-                  }
-                }
-              },
-              "group": "",
-              "groupIndex": 0,
-              "userWidgetPageName": "BottomNavBar",
-              "userPropertyValues": {
-                "objID": "d86ac677-38b2-491f-9080-914d633d057a",
-                "values": {}
-              }
-            },
             {
               "objID": "f742ab03-695c-4127-d35a-fb477edd78d1",
               "type": "LVGLPanelWidget",
@@ -3104,6 +3052,58 @@
               },
               "group": "",
               "groupIndex": 0
+            },
+            {
+              "objID": "4e87b907-f99b-4500-a66d-c95ffa50bfe4",
+              "type": "LVGLUserWidgetWidget",
+              "left": 0,
+              "top": 0,
+              "width": 1024,
+              "height": 60,
+              "customInputs": [],
+              "customOutputs": [],
+              "style": {
+                "objID": "f85537b8-51e5-4ef1-d731-1146e32dea84",
+                "useStyle": "default",
+                "conditionalStyles": [],
+                "childStyles": []
+              },
+              "timeline": [],
+              "eventHandlers": [],
+              "identifier": "HomePageBottomNavBar",
+              "leftUnit": "px",
+              "topUnit": "px",
+              "widthUnit": "px",
+              "heightUnit": "px",
+              "children": [],
+              "widgetFlags": "CLICK_FOCUSABLE|GESTURE_BUBBLE|PRESS_LOCK|SCROLLABLE|SCROLL_CHAIN_HOR|SCROLL_CHAIN_VER|SCROLL_ELASTIC|SCROLL_MOMENTUM|SCROLL_WITH_ARROW|SNAPPABLE",
+              "hiddenFlagType": "literal",
+              "clickableFlag": true,
+              "clickableFlagType": "literal",
+              "flagScrollbarMode": "",
+              "flagScrollDirection": "",
+              "scrollSnapX": "",
+              "scrollSnapY": "",
+              "checkedStateType": "literal",
+              "disabledStateType": "literal",
+              "states": "",
+              "localStyles": {
+                "objID": "d2cd95d1-aed8-4324-f222-26d24eae1b97",
+                "definition": {
+                  "MAIN": {
+                    "DEFAULT": {
+                      "align": "BOTTOM_LEFT"
+                    }
+                  }
+                }
+              },
+              "group": "",
+              "groupIndex": 0,
+              "userWidgetPageName": "BottomNavBar",
+              "userPropertyValues": {
+                "objID": "90b05f16-ebfe-4da1-9af9-19e97f0595ee",
+                "values": {}
+              }
             }
           ],
           "widgetFlags": "CLICKABLE|PRESS_LOCK|CLICK_FOCUSABLE|GESTURE_BUBBLE|SNAPPABLE|SCROLLABLE|SCROLL_ELASTIC|SCROLL_MOMENTUM|SCROLL_CHAIN_HOR|SCROLL_CHAIN_VER",
@@ -3125,8 +3125,8 @@
       "name": "PageHome",
       "left": 0,
       "top": 0,
-      "width": 800,
-      "height": 480,
+      "width": 1024,
+      "height": 600,
       "createAtStart": true,
       "deleteOnScreenUnload": false
     },
@@ -3156,23 +3156,23 @@
           "heightUnit": "px",
           "children": [
             {
-              "objID": "3f7e225a-74f2-4054-b5a6-27ed49da4b2a",
+              "objID": "60a22ec6-1bab-4503-96a9-f7097d21b31d",
               "type": "LVGLUserWidgetWidget",
               "left": 0,
               "top": 0,
-              "width": 800,
+              "width": 1024,
               "height": 60,
               "customInputs": [],
               "customOutputs": [],
               "style": {
-                "objID": "854c88f9-e9d0-40c5-fb00-65f8ee29a634",
+                "objID": "872e04ee-84ef-44c8-bc64-5cbc06d0afc7",
                 "useStyle": "default",
                 "conditionalStyles": [],
                 "childStyles": []
               },
               "timeline": [],
               "eventHandlers": [],
-              "identifier": "WidgetTrailerPageBottomNavBar",
+              "identifier": "TrailerPageBottomNavBar",
               "leftUnit": "px",
               "topUnit": "px",
               "widthUnit": "px",
@@ -3190,7 +3190,7 @@
               "disabledStateType": "literal",
               "states": "",
               "localStyles": {
-                "objID": "5f5984ea-d611-40ee-fef3-bfa89c7db6bb",
+                "objID": "12460beb-d290-4943-dbec-99b002382caa",
                 "definition": {
                   "MAIN": {
                     "DEFAULT": {
@@ -3203,7 +3203,7 @@
               "groupIndex": 0,
               "userWidgetPageName": "BottomNavBar",
               "userPropertyValues": {
-                "objID": "9e487fe2-d515-4ada-a8ef-64a02b86851c",
+                "objID": "928dcc48-2bc7-4bdb-983b-fa046c7ac8c8",
                 "values": {}
               }
             },
@@ -4705,8 +4705,8 @@
       "name": "PageTrailer",
       "left": 0,
       "top": 0,
-      "width": 800,
-      "height": 480,
+      "width": 1024,
+      "height": 600,
       "isUsedAsUserWidget": false,
       "createAtStart": true,
       "deleteOnScreenUnload": false
@@ -4736,58 +4736,6 @@
           "widthUnit": "px",
           "heightUnit": "px",
           "children": [
-            {
-              "objID": "e1908940-f397-434e-8aaa-8b2005ee34c6",
-              "type": "LVGLUserWidgetWidget",
-              "left": 0,
-              "top": 0,
-              "width": 800,
-              "height": 60,
-              "customInputs": [],
-              "customOutputs": [],
-              "style": {
-                "objID": "4ad54618-a075-4015-8012-746cf8054606",
-                "useStyle": "default",
-                "conditionalStyles": [],
-                "childStyles": []
-              },
-              "timeline": [],
-              "eventHandlers": [],
-              "identifier": "WidgetPowerManagementPageBottomNavBar",
-              "leftUnit": "px",
-              "topUnit": "px",
-              "widthUnit": "px",
-              "heightUnit": "px",
-              "children": [],
-              "widgetFlags": "CLICK_FOCUSABLE|GESTURE_BUBBLE|PRESS_LOCK|SCROLLABLE|SCROLL_CHAIN_HOR|SCROLL_CHAIN_VER|SCROLL_ELASTIC|SCROLL_MOMENTUM|SCROLL_WITH_ARROW|SNAPPABLE",
-              "hiddenFlagType": "literal",
-              "clickableFlag": true,
-              "clickableFlagType": "literal",
-              "flagScrollbarMode": "",
-              "flagScrollDirection": "",
-              "scrollSnapX": "",
-              "scrollSnapY": "",
-              "checkedStateType": "literal",
-              "disabledStateType": "literal",
-              "states": "",
-              "localStyles": {
-                "objID": "166ffc35-48f4-4a5c-bc99-94e0250f3399",
-                "definition": {
-                  "MAIN": {
-                    "DEFAULT": {
-                      "align": "BOTTOM_LEFT"
-                    }
-                  }
-                }
-              },
-              "group": "",
-              "groupIndex": 0,
-              "userWidgetPageName": "BottomNavBar",
-              "userPropertyValues": {
-                "objID": "d73cb470-8d1a-4920-e6b3-3b6844d2a795",
-                "values": {}
-              }
-            },
             {
               "objID": "f3235a1f-fb2e-41e1-effa-87f62e9932e4",
               "type": "LVGLPanelWidget",
@@ -6344,6 +6292,58 @@
               },
               "group": "",
               "groupIndex": 0
+            },
+            {
+              "objID": "269f5624-4577-4677-d26b-9d82f00f5ec1",
+              "type": "LVGLUserWidgetWidget",
+              "left": 0,
+              "top": 0,
+              "width": 1024,
+              "height": 60,
+              "customInputs": [],
+              "customOutputs": [],
+              "style": {
+                "objID": "cc01aa5c-3abc-4d44-d023-b283b6809069",
+                "useStyle": "default",
+                "conditionalStyles": [],
+                "childStyles": []
+              },
+              "timeline": [],
+              "eventHandlers": [],
+              "identifier": "PowerManagementPageBottomNavBar",
+              "leftUnit": "px",
+              "topUnit": "px",
+              "widthUnit": "px",
+              "heightUnit": "px",
+              "children": [],
+              "widgetFlags": "CLICK_FOCUSABLE|GESTURE_BUBBLE|PRESS_LOCK|SCROLLABLE|SCROLL_CHAIN_HOR|SCROLL_CHAIN_VER|SCROLL_ELASTIC|SCROLL_MOMENTUM|SCROLL_WITH_ARROW|SNAPPABLE",
+              "hiddenFlagType": "literal",
+              "clickableFlag": true,
+              "clickableFlagType": "literal",
+              "flagScrollbarMode": "",
+              "flagScrollDirection": "",
+              "scrollSnapX": "",
+              "scrollSnapY": "",
+              "checkedStateType": "literal",
+              "disabledStateType": "literal",
+              "states": "",
+              "localStyles": {
+                "objID": "271b27c3-27eb-464a-99f1-080d08d8dfee",
+                "definition": {
+                  "MAIN": {
+                    "DEFAULT": {
+                      "align": "BOTTOM_LEFT"
+                    }
+                  }
+                }
+              },
+              "group": "",
+              "groupIndex": 0,
+              "userWidgetPageName": "BottomNavBar",
+              "userPropertyValues": {
+                "objID": "3d1b1fc3-6bf3-46c4-d3d0-df35840aebc3",
+                "values": {}
+              }
             }
           ],
           "widgetFlags": "CLICKABLE|PRESS_LOCK|CLICK_FOCUSABLE|GESTURE_BUBBLE|SNAPPABLE|SCROLLABLE|SCROLL_ELASTIC|SCROLL_MOMENTUM|SCROLL_CHAIN_HOR|SCROLL_CHAIN_VER",
@@ -6365,8 +6365,8 @@
       "name": "PagePowerManagement",
       "left": 0,
       "top": 0,
-      "width": 800,
-      "height": 480,
+      "width": 1024,
+      "height": 600,
       "isUsedAsUserWidget": false,
       "createAtStart": true,
       "deleteOnScreenUnload": false
@@ -6396,58 +6396,6 @@
           "widthUnit": "px",
           "heightUnit": "px",
           "children": [
-            {
-              "objID": "24e51699-68ce-403f-b757-f62358bc8a40",
-              "type": "LVGLUserWidgetWidget",
-              "left": 0,
-              "top": 0,
-              "width": 800,
-              "height": 60,
-              "customInputs": [],
-              "customOutputs": [],
-              "style": {
-                "objID": "ed6d47a7-ad9a-48f5-b2c5-05cd82ac7eaf",
-                "useStyle": "default",
-                "conditionalStyles": [],
-                "childStyles": []
-              },
-              "timeline": [],
-              "eventHandlers": [],
-              "identifier": "WidgetAirQualityPageBottomNavBar",
-              "leftUnit": "px",
-              "topUnit": "px",
-              "widthUnit": "px",
-              "heightUnit": "px",
-              "children": [],
-              "widgetFlags": "CLICK_FOCUSABLE|GESTURE_BUBBLE|PRESS_LOCK|SCROLLABLE|SCROLL_CHAIN_HOR|SCROLL_CHAIN_VER|SCROLL_ELASTIC|SCROLL_MOMENTUM|SCROLL_WITH_ARROW|SNAPPABLE",
-              "hiddenFlagType": "literal",
-              "clickableFlag": true,
-              "clickableFlagType": "literal",
-              "flagScrollbarMode": "",
-              "flagScrollDirection": "",
-              "scrollSnapX": "",
-              "scrollSnapY": "",
-              "checkedStateType": "literal",
-              "disabledStateType": "literal",
-              "states": "",
-              "localStyles": {
-                "objID": "c0a96768-fc54-492a-a86c-f2e02d7bb561",
-                "definition": {
-                  "MAIN": {
-                    "DEFAULT": {
-                      "align": "BOTTOM_LEFT"
-                    }
-                  }
-                }
-              },
-              "group": "",
-              "groupIndex": 0,
-              "userWidgetPageName": "BottomNavBar",
-              "userPropertyValues": {
-                "objID": "6dee4d6b-dcfb-4606-c1aa-65521fca6442",
-                "values": {}
-              }
-            },
             {
               "objID": "82608ae5-156c-4e8e-e789-1ac3de182bca",
               "type": "LVGLPanelWidget",
@@ -6660,8 +6608,8 @@
                   "type": "LVGLLabelWidget",
                   "left": 5,
                   "top": 3,
-                  "width": 114,
-                  "height": 27,
+                  "width": 95,
+                  "height": 16,
                   "customInputs": [],
                   "customOutputs": [],
                   "style": {
@@ -6781,7 +6729,7 @@
                   "type": "LVGLLabelWidget",
                   "left": 0,
                   "top": -12,
-                  "width": 80,
+                  "width": 32,
                   "height": 52,
                   "customInputs": [],
                   "customOutputs": [],
@@ -6833,8 +6781,8 @@
                   "type": "LVGLLabelWidget",
                   "left": 0,
                   "top": 22,
-                  "width": 20,
-                  "height": 20,
+                  "width": 17,
+                  "height": 18,
                   "customInputs": [],
                   "customOutputs": [],
                   "style": {
@@ -6873,7 +6821,7 @@
                   },
                   "group": "",
                   "groupIndex": 0,
-                  "text": "\u00b0F",
+                  "text": "°F",
                   "textType": "literal",
                   "longMode": "WRAP",
                   "recolor": false
@@ -6883,8 +6831,8 @@
                   "type": "LVGLLabelWidget",
                   "left": 0,
                   "top": -5,
-                  "width": 50,
-                  "height": 20,
+                  "width": 29,
+                  "height": 16,
                   "customInputs": [],
                   "customOutputs": [],
                   "style": {
@@ -6924,11 +6872,11 @@
                   },
                   "group": "",
                   "groupIndex": 0,
-                  "text": "0 \u00b0C",
+                  "text": "0 °C",
                   "textType": "literal",
                   "longMode": "WRAP",
                   "recolor": false,
-                  "previewValue": "22 \u00b0C"
+                  "previewValue": "22 °C"
                 }
               ],
               "widgetFlags": "",
@@ -6983,8 +6931,8 @@
                   "type": "LVGLLabelWidget",
                   "left": 5,
                   "top": 3,
-                  "width": 159,
-                  "height": 27,
+                  "width": 68,
+                  "height": 16,
                   "customInputs": [],
                   "customOutputs": [],
                   "style": {
@@ -7104,7 +7052,7 @@
                   "type": "LVGLLabelWidget",
                   "left": 0,
                   "top": -12,
-                  "width": 80,
+                  "width": 32,
                   "height": 52,
                   "customInputs": [],
                   "customOutputs": [],
@@ -7156,8 +7104,8 @@
                   "type": "LVGLLabelWidget",
                   "left": 0,
                   "top": 22,
-                  "width": 20,
-                  "height": 20,
+                  "width": 14,
+                  "height": 18,
                   "customInputs": [],
                   "customOutputs": [],
                   "style": {
@@ -7225,6 +7173,58 @@
               },
               "group": "",
               "groupIndex": 0
+            },
+            {
+              "objID": "070e0ae3-33b0-4968-9035-c4e64a28c1f4",
+              "type": "LVGLUserWidgetWidget",
+              "left": 0,
+              "top": 0,
+              "width": 1024,
+              "height": 60,
+              "customInputs": [],
+              "customOutputs": [],
+              "style": {
+                "objID": "fb3caf7d-08f7-4839-c77a-c884908e2424",
+                "useStyle": "default",
+                "conditionalStyles": [],
+                "childStyles": []
+              },
+              "timeline": [],
+              "eventHandlers": [],
+              "identifier": "AirQualityPageBottomNavBar",
+              "leftUnit": "px",
+              "topUnit": "px",
+              "widthUnit": "px",
+              "heightUnit": "px",
+              "children": [],
+              "widgetFlags": "CLICK_FOCUSABLE|GESTURE_BUBBLE|PRESS_LOCK|SCROLLABLE|SCROLL_CHAIN_HOR|SCROLL_CHAIN_VER|SCROLL_ELASTIC|SCROLL_MOMENTUM|SCROLL_WITH_ARROW|SNAPPABLE",
+              "hiddenFlagType": "literal",
+              "clickableFlag": true,
+              "clickableFlagType": "literal",
+              "flagScrollbarMode": "",
+              "flagScrollDirection": "",
+              "scrollSnapX": "",
+              "scrollSnapY": "",
+              "checkedStateType": "literal",
+              "disabledStateType": "literal",
+              "states": "",
+              "localStyles": {
+                "objID": "abdfa2a4-facb-447d-f5e2-e33109ef132b",
+                "definition": {
+                  "MAIN": {
+                    "DEFAULT": {
+                      "align": "BOTTOM_LEFT"
+                    }
+                  }
+                }
+              },
+              "group": "",
+              "groupIndex": 0,
+              "userWidgetPageName": "BottomNavBar",
+              "userPropertyValues": {
+                "objID": "4061b9c0-26e8-4ff0-e8c7-4d523465f88f",
+                "values": {}
+              }
             }
           ],
           "widgetFlags": "CLICKABLE|PRESS_LOCK|CLICK_FOCUSABLE|GESTURE_BUBBLE|SNAPPABLE|SCROLLABLE|SCROLL_ELASTIC|SCROLL_MOMENTUM|SCROLL_CHAIN_HOR|SCROLL_CHAIN_VER",
@@ -7246,8 +7246,8 @@
       "name": "PageAirQuality",
       "left": 0,
       "top": 0,
-      "width": 800,
-      "height": 480,
+      "width": 1024,
+      "height": 600,
       "isUsedAsUserWidget": false,
       "createAtStart": true,
       "deleteOnScreenUnload": false
@@ -7277,58 +7277,6 @@
           "widthUnit": "px",
           "heightUnit": "px",
           "children": [
-            {
-              "objID": "11a80fe3-0d19-4467-de3f-5b25e976637d",
-              "type": "LVGLUserWidgetWidget",
-              "left": 0,
-              "top": 0,
-              "width": 800,
-              "height": 60,
-              "customInputs": [],
-              "customOutputs": [],
-              "style": {
-                "objID": "0c270067-a5d7-4337-aa8f-cbd46d799104",
-                "useStyle": "default",
-                "conditionalStyles": [],
-                "childStyles": []
-              },
-              "timeline": [],
-              "eventHandlers": [],
-              "identifier": "WidgetWaterPageBottomNavBar",
-              "leftUnit": "px",
-              "topUnit": "px",
-              "widthUnit": "px",
-              "heightUnit": "px",
-              "children": [],
-              "widgetFlags": "CLICK_FOCUSABLE|GESTURE_BUBBLE|PRESS_LOCK|SCROLLABLE|SCROLL_CHAIN_HOR|SCROLL_CHAIN_VER|SCROLL_ELASTIC|SCROLL_MOMENTUM|SCROLL_WITH_ARROW|SNAPPABLE",
-              "hiddenFlagType": "literal",
-              "clickableFlag": true,
-              "clickableFlagType": "literal",
-              "flagScrollbarMode": "",
-              "flagScrollDirection": "",
-              "scrollSnapX": "",
-              "scrollSnapY": "",
-              "checkedStateType": "literal",
-              "disabledStateType": "literal",
-              "states": "",
-              "localStyles": {
-                "objID": "69f99486-cacf-486e-9426-619ffb243000",
-                "definition": {
-                  "MAIN": {
-                    "DEFAULT": {
-                      "align": "BOTTOM_LEFT"
-                    }
-                  }
-                }
-              },
-              "group": "",
-              "groupIndex": 0,
-              "userWidgetPageName": "BottomNavBar",
-              "userPropertyValues": {
-                "objID": "43ba09a1-2603-44f4-8a7b-3ab7cf6b1881",
-                "values": {}
-              }
-            },
             {
               "objID": "80ae04e5-ecd9-4760-b64a-b2d029bc5bc4",
               "type": "LVGLPanelWidget",
@@ -7773,6 +7721,58 @@
               },
               "group": "",
               "groupIndex": 0
+            },
+            {
+              "objID": "f98fe1c3-6a71-420c-d409-68593ef1ed1e",
+              "type": "LVGLUserWidgetWidget",
+              "left": 0,
+              "top": 0,
+              "width": 1024,
+              "height": 60,
+              "customInputs": [],
+              "customOutputs": [],
+              "style": {
+                "objID": "1316c9bb-4c2c-43b5-a75f-d92386f44b4a",
+                "useStyle": "default",
+                "conditionalStyles": [],
+                "childStyles": []
+              },
+              "timeline": [],
+              "eventHandlers": [],
+              "identifier": "WaterPageBottomNavBar",
+              "leftUnit": "px",
+              "topUnit": "px",
+              "widthUnit": "px",
+              "heightUnit": "px",
+              "children": [],
+              "widgetFlags": "CLICK_FOCUSABLE|GESTURE_BUBBLE|PRESS_LOCK|SCROLLABLE|SCROLL_CHAIN_HOR|SCROLL_CHAIN_VER|SCROLL_ELASTIC|SCROLL_MOMENTUM|SCROLL_WITH_ARROW|SNAPPABLE",
+              "hiddenFlagType": "literal",
+              "clickableFlag": true,
+              "clickableFlagType": "literal",
+              "flagScrollbarMode": "",
+              "flagScrollDirection": "",
+              "scrollSnapX": "",
+              "scrollSnapY": "",
+              "checkedStateType": "literal",
+              "disabledStateType": "literal",
+              "states": "",
+              "localStyles": {
+                "objID": "5e4928e1-d359-4285-af51-24717a07222e",
+                "definition": {
+                  "MAIN": {
+                    "DEFAULT": {
+                      "align": "BOTTOM_LEFT"
+                    }
+                  }
+                }
+              },
+              "group": "",
+              "groupIndex": 0,
+              "userWidgetPageName": "BottomNavBar",
+              "userPropertyValues": {
+                "objID": "21109ff7-3920-492f-a696-150e96843651",
+                "values": {}
+              }
             }
           ],
           "widgetFlags": "CLICKABLE|PRESS_LOCK|CLICK_FOCUSABLE|GESTURE_BUBBLE|SNAPPABLE|SCROLLABLE|SCROLL_ELASTIC|SCROLL_MOMENTUM|SCROLL_CHAIN_HOR|SCROLL_CHAIN_VER",
@@ -7803,8 +7803,8 @@
       "name": "PageWater",
       "left": 0,
       "top": 0,
-      "width": 800,
-      "height": 480,
+      "width": 1024,
+      "height": 600,
       "isUsedAsUserWidget": false,
       "createAtStart": true,
       "deleteOnScreenUnload": false
@@ -7834,58 +7834,6 @@
           "widthUnit": "px",
           "heightUnit": "px",
           "children": [
-            {
-              "objID": "b87c953c-a2e5-4ccf-9291-b09d99d712b3",
-              "type": "LVGLUserWidgetWidget",
-              "left": 0,
-              "top": 0,
-              "width": 800,
-              "height": 60,
-              "customInputs": [],
-              "customOutputs": [],
-              "style": {
-                "objID": "2e4d0be1-564c-4e54-93d6-dccdc56a9df6",
-                "useStyle": "default",
-                "conditionalStyles": [],
-                "childStyles": []
-              },
-              "timeline": [],
-              "eventHandlers": [],
-              "identifier": "WidgetSettingsPageBottomNavBar",
-              "leftUnit": "px",
-              "topUnit": "px",
-              "widthUnit": "px",
-              "heightUnit": "px",
-              "children": [],
-              "widgetFlags": "CLICK_FOCUSABLE|GESTURE_BUBBLE|PRESS_LOCK|SCROLLABLE|SCROLL_CHAIN_HOR|SCROLL_CHAIN_VER|SCROLL_ELASTIC|SCROLL_MOMENTUM|SCROLL_WITH_ARROW|SNAPPABLE",
-              "hiddenFlagType": "literal",
-              "clickableFlag": true,
-              "clickableFlagType": "literal",
-              "flagScrollbarMode": "",
-              "flagScrollDirection": "",
-              "scrollSnapX": "",
-              "scrollSnapY": "",
-              "checkedStateType": "literal",
-              "disabledStateType": "literal",
-              "states": "",
-              "localStyles": {
-                "objID": "b52f9e40-178a-45a8-9768-8e5420288743",
-                "definition": {
-                  "MAIN": {
-                    "DEFAULT": {
-                      "align": "BOTTOM_LEFT"
-                    }
-                  }
-                }
-              },
-              "group": "",
-              "groupIndex": 0,
-              "userWidgetPageName": "BottomNavBar",
-              "userPropertyValues": {
-                "objID": "735009d9-977e-4c61-82ed-e0ec1c6395bb",
-                "values": {}
-              }
-            },
             {
               "objID": "382d9bce-a1b1-4469-978c-57432a31a6e2",
               "type": "LVGLTabviewWidget",
@@ -10189,6 +10137,58 @@
               "groupIndex": 0,
               "textarea": "textarea_wifi_password",
               "mode": "TEXT_LOWER"
+            },
+            {
+              "objID": "f7be6c41-5ee1-492f-f968-2c8767524d8c",
+              "type": "LVGLUserWidgetWidget",
+              "left": 0,
+              "top": 0,
+              "width": 1024,
+              "height": 60,
+              "customInputs": [],
+              "customOutputs": [],
+              "style": {
+                "objID": "2dae2807-ddc3-40db-8660-5ef38d28dcd1",
+                "useStyle": "default",
+                "conditionalStyles": [],
+                "childStyles": []
+              },
+              "timeline": [],
+              "eventHandlers": [],
+              "identifier": "SettingsPageBottomNavBar",
+              "leftUnit": "px",
+              "topUnit": "px",
+              "widthUnit": "px",
+              "heightUnit": "px",
+              "children": [],
+              "widgetFlags": "CLICK_FOCUSABLE|GESTURE_BUBBLE|PRESS_LOCK|SCROLLABLE|SCROLL_CHAIN_HOR|SCROLL_CHAIN_VER|SCROLL_ELASTIC|SCROLL_MOMENTUM|SCROLL_WITH_ARROW|SNAPPABLE",
+              "hiddenFlagType": "literal",
+              "clickableFlag": true,
+              "clickableFlagType": "literal",
+              "flagScrollbarMode": "",
+              "flagScrollDirection": "",
+              "scrollSnapX": "",
+              "scrollSnapY": "",
+              "checkedStateType": "literal",
+              "disabledStateType": "literal",
+              "states": "",
+              "localStyles": {
+                "objID": "818d3034-349d-4256-9e67-dca7a5a579bc",
+                "definition": {
+                  "MAIN": {
+                    "DEFAULT": {
+                      "align": "BOTTOM_LEFT"
+                    }
+                  }
+                }
+              },
+              "group": "",
+              "groupIndex": 0,
+              "userWidgetPageName": "BottomNavBar",
+              "userPropertyValues": {
+                "objID": "6026ee0d-453f-418b-9951-56c228f4256e",
+                "values": {}
+              }
             }
           ],
           "widgetFlags": "CLICKABLE|PRESS_LOCK|CLICK_FOCUSABLE|GESTURE_BUBBLE|SNAPPABLE|SCROLLABLE|SCROLL_ELASTIC|SCROLL_MOMENTUM|SCROLL_CHAIN_HOR|SCROLL_CHAIN_VER",
@@ -10210,8 +10210,8 @@
       "name": "PageSettings",
       "left": 0,
       "top": 0,
-      "width": 800,
-      "height": 480,
+      "width": 1024,
+      "height": 600,
       "isUsedAsUserWidget": false,
       "createAtStart": true,
       "deleteOnScreenUnload": false
@@ -10226,7 +10226,7 @@
           "type": "LVGLPanelWidget",
           "left": 0,
           "top": 0,
-          "width": 800,
+          "width": 1024,
           "height": 60,
           "customInputs": [],
           "customOutputs": [],
@@ -10880,7 +10880,7 @@
       "name": "BottomNavBar",
       "left": 0,
       "top": 0,
-      "width": 800,
+      "width": 1024,
       "height": 60,
       "isUsedAsUserWidget": true,
       "createAtStart": true,
@@ -11747,8 +11747,8 @@
             "MAIN": {
               "DEFAULT": {
                 "align": "BOTTOM_LEFT",
-                "min_width": 800,
-                "max_width": 800,
+                "min_width": 1024,
+                "max_width": 1024,
                 "min_height": 60,
                 "max_height": 60,
                 "pad_top": 0,

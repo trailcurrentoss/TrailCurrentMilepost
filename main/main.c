@@ -24,49 +24,55 @@
 
 static const char *TAG = "milepost";
 
-// Display resolution
-#define SCREEN_WIDTH  800
-#define SCREEN_HEIGHT 480
+// Display resolution (ESP32-S3-Touch-LCD-7B: 1024x600)
+#define SCREEN_WIDTH  1024
+#define SCREEN_HEIGHT 600
 
 // ============================================================================
-// CH422G IO expander
-// Uses different I2C addresses per function (no register addressing).
-//   0x24 = system parameter (write IO_OE=1 to enable push-pull EXIO outputs)
-//   0x38 = IO0-7 output data
-// Pin mapping within the 0x38 output byte:
-//   Bit 1 = EXIO1 = Touch RST
-//   Bit 2 = EXIO2 = Backlight enable
-//   Bit 4 = EXIO4 = SD_CS
-//   Bit 5 = EXIO5 = CAN_SEL (high=CAN, low=USB)
+// IO Extension (CH32V003 MCU) via I2C
+// Register-based protocol at address 0x24:
+//   0x02 = mode control (0xFF = all pins output)
+//   0x03 = IO output    (bitfield for IO0-IO7)
+//   0x05 = PWM output   (backlight brightness: 0=bright, ~247=dimmest)
+//   0x06 = ADC input    (battery voltage)
+// Pin mapping within the IO output byte:
+//   Bit 1 = IO1 = Touch RST
+//   Bit 2 = IO2 = Backlight enable
+//   Bit 3 = IO3 = LCD RST
+//   Bit 4 = IO4 = SD_CS
+//   Bit 5 = IO5 = CAN_SEL (high=CAN, low=USB)
 // ============================================================================
-#define CH422G_SYS_ADDR   0x24
-#define CH422G_OUT_ADDR   0x38
+#define IO_EXT_ADDR          0x24
+#define IO_EXT_REG_MODE      0x02
+#define IO_EXT_REG_OUTPUT    0x03
+#define IO_EXT_REG_PWM       0x05
 
-#define CH422G_EXIO1_BIT  (1 << 1)   // Touch RST
-#define CH422G_EXIO2_BIT  (1 << 2)   // Backlight enable
-#define CH422G_EXIO5_BIT  (1 << 5)   // CAN_SEL
+#define IO_EXT_IO1_BIT  (1 << 1)   // Touch RST
+#define IO_EXT_IO2_BIT  (1 << 2)   // Backlight enable
+#define IO_EXT_IO3_BIT  (1 << 3)   // LCD RST
+#define IO_EXT_IO5_BIT  (1 << 5)   // CAN_SEL
 
 #define I2C_PORT     I2C_NUM_0
 #define I2C_SDA_PIN  8
 #define I2C_SCL_PIN  9
 #define I2C_FREQ_HZ  400000
 
-static uint8_t ch422g_out = 0;
+static uint8_t io_ext_out = 0;
 
-static esp_err_t ch422g_write(uint8_t addr, uint8_t val)
+static esp_err_t io_ext_write_reg(uint8_t reg, uint8_t val)
 {
-    uint8_t buf = val;
-    return i2c_master_write_to_device(I2C_PORT, addr, &buf, 1, pdMS_TO_TICKS(100));
+    uint8_t buf[2] = {reg, val};
+    return i2c_master_write_to_device(I2C_PORT, IO_EXT_ADDR, buf, 2, pdMS_TO_TICKS(100));
 }
 
-static void ch422g_set_bit(uint8_t bit, bool high)
+static void io_ext_set_bit(uint8_t bit, bool high)
 {
-    if (high) ch422g_out |= bit;
-    else      ch422g_out &= ~bit;
-    ch422g_write(CH422G_OUT_ADDR, ch422g_out);
+    if (high) io_ext_out |= bit;
+    else      io_ext_out &= ~bit;
+    io_ext_write_reg(IO_EXT_REG_OUTPUT, io_ext_out);
 }
 
-static void ch422g_init(void)
+static void io_ext_init(void)
 {
     i2c_config_t conf = {
         .mode = I2C_MODE_MASTER,
@@ -79,40 +85,41 @@ static void ch422g_init(void)
     i2c_param_config(I2C_PORT, &conf);
     i2c_driver_install(I2C_PORT, I2C_MODE_MASTER, 0, 0, 0);
 
-    // Enable push-pull output mode for EXIO pins (IO_OE = bit 0)
-    esp_err_t err = ch422g_write(CH422G_SYS_ADDR, 0x01);
-    ESP_LOGI(TAG, "CH422G init %s", err == ESP_OK ? "OK" : "FAILED");
+    // Set all IO pins to output mode
+    esp_err_t err = io_ext_write_reg(IO_EXT_REG_MODE, 0xFF);
+    ESP_LOGI(TAG, "IO extension init %s", err == ESP_OK ? "OK" : "FAILED");
 
-    // Backlight on, CAN_SEL=0 (USB mode), touch RST low
-    ch422g_out = CH422G_EXIO2_BIT;
-    ch422g_write(CH422G_OUT_ADDR, ch422g_out);
+    // Backlight on, LCD RST high, touch RST high, CAN_SEL=0 (USB mode)
+    io_ext_out = IO_EXT_IO1_BIT | IO_EXT_IO2_BIT | IO_EXT_IO3_BIT;
+    io_ext_write_reg(IO_EXT_REG_OUTPUT, io_ext_out);
 }
 
 // ============================================================================
-// Backlight (digital on/off via CH422G EXIO2, no PWM)
+// Backlight (PWM via CH32V003 IO extension register 0x05)
+// PWM register is inverted: 0 = full bright, ~247 = dimmest safe value.
+// The CH32V003 caps at 97% duty to prevent the backlight from fully turning
+// off via PWM alone — use IO2 (backlight enable) for true off.
 // ============================================================================
 static uint8_t current_brightness = 255;
 static bool screen_timed_out = false;
-static lv_obj_t *dimming_overlay = NULL;
 
-// Map brightness (0-255) to overlay opacity.
-// 255 = full bright (overlay invisible), 0 = screen off (backlight off).
-// Values 1-255 produce a software dim via a black overlay.
+// Map brightness (0-255) to CH32V003 PWM register.
+// 255 = full bright, 0 = screen off (backlight disabled via IO2).
 static void apply_brightness(uint8_t brightness)
 {
     if (brightness == 0) {
         // Fully off — kill backlight to save power
-        ch422g_set_bit(CH422G_EXIO2_BIT, false);
+        io_ext_set_bit(IO_EXT_IO2_BIT, false);
         return;
     }
     // Ensure backlight is on
-    ch422g_set_bit(CH422G_EXIO2_BIT, true);
+    io_ext_set_bit(IO_EXT_IO2_BIT, true);
 
-    if (dimming_overlay) {
-        // Invert: brightness 255 = fully transparent, brightness 1 = nearly opaque
-        lv_opa_t opa = (lv_opa_t)(255 - brightness);
-        lv_obj_set_style_bg_opa(dimming_overlay, opa, 0);
-    }
+    // Invert: our brightness 255 = PWM 0 (full bright),
+    //         our brightness 1   = PWM 247 (dimmest safe)
+    uint8_t pwm_val = 255 - brightness;
+    if (pwm_val > 247) pwm_val = 247;
+    io_ext_write_reg(IO_EXT_REG_PWM, pwm_val);
 }
 
 void set_backlight(uint8_t brightness)
@@ -126,18 +133,6 @@ void set_backlight(uint8_t brightness)
 uint8_t get_backlight(void)
 {
     return current_brightness;
-}
-
-static void create_dimming_overlay(void)
-{
-    dimming_overlay = lv_obj_create(lv_layer_top());
-    lv_obj_remove_style_all(dimming_overlay);
-    lv_obj_set_size(dimming_overlay, SCREEN_WIDTH, SCREEN_HEIGHT);
-    lv_obj_set_style_bg_color(dimming_overlay, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(dimming_overlay, LV_OPA_TRANSP, 0);
-    // Let touch events pass through to widgets underneath
-    lv_obj_add_flag(dimming_overlay, LV_OBJ_FLAG_FLOATING);
-    lv_obj_clear_flag(dimming_overlay, LV_OBJ_FLAG_CLICKABLE);
 }
 
 // ============================================================================
@@ -161,28 +156,39 @@ static IRAM_ATTR bool on_vsync(esp_lcd_panel_handle_t panel,
     return woken == pdTRUE;
 }
 
+static void lcd_reset(void)
+{
+    // Pulse LCD RST via IO extension IO3
+    io_ext_set_bit(IO_EXT_IO3_BIT, false);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    io_ext_set_bit(IO_EXT_IO3_BIT, true);
+    vTaskDelay(pdMS_TO_TICKS(100));
+}
+
 static void lcd_init(void)
 {
+    lcd_reset();
     vsync_sem = xSemaphoreCreateBinary();
 
     esp_lcd_rgb_panel_config_t panel_config = {
         .clk_src = LCD_CLK_SRC_DEFAULT,
         .timings = {
-            .pclk_hz = 21000000,
+            .pclk_hz = 30850000,
             .h_res = SCREEN_WIDTH,
             .v_res = SCREEN_HEIGHT,
-            .hsync_pulse_width = 30,
-            .hsync_back_porch = 16,
-            .hsync_front_porch = 210,
-            .vsync_pulse_width = 13,
-            .vsync_back_porch = 10,
-            .vsync_front_porch = 22,
+            .hsync_pulse_width = 162,
+            .hsync_back_porch = 152,
+            .hsync_front_porch = 48,
+            .vsync_pulse_width = 45,
+            .vsync_back_porch = 13,
+            .vsync_front_porch = 3,
             .flags.pclk_active_neg = true,
         },
         .data_width = 16,
         .bits_per_pixel = 16,
         .num_fbs = 2,
-        .bounce_buffer_size_px = SCREEN_WIDTH * 20,
+        .bounce_buffer_size_px = SCREEN_WIDTH * 10,
+        .sram_trans_align = 4,
         .psram_trans_align = 64,
         .de_gpio_num = 5,
         .pclk_gpio_num = 7,
@@ -218,10 +224,10 @@ static esp_lcd_touch_handle_t touch_handle = NULL;
 
 static void touch_init(void)
 {
-    // Pulse touch RST via CH422G EXIO1
-    ch422g_set_bit(CH422G_EXIO1_BIT, false);
+    // Pulse touch RST via IO extension IO1
+    io_ext_set_bit(IO_EXT_IO1_BIT, false);
     vTaskDelay(pdMS_TO_TICKS(10));
-    ch422g_set_bit(CH422G_EXIO1_BIT, true);
+    io_ext_set_bit(IO_EXT_IO1_BIT, true);
     vTaskDelay(pdMS_TO_TICKS(100));
 
     esp_lcd_panel_io_handle_t tp_io_handle = NULL;
@@ -231,7 +237,7 @@ static void touch_init(void)
     esp_lcd_touch_config_t tp_cfg = {
         .x_max = SCREEN_WIDTH,
         .y_max = SCREEN_HEIGHT,
-        .rst_gpio_num = -1,   // RST handled via CH422G above
+        .rst_gpio_num = -1,   // RST handled via IO extension above
         .int_gpio_num = 4,
         .flags = {
             .swap_xy = 0,
@@ -440,7 +446,7 @@ static void can_init(void)
 {
     // Switch GPIO19/20 from USB to CAN transceiver
     ESP_LOGI(TAG, "Switching to CAN mode");
-    ch422g_set_bit(CH422G_EXIO5_BIT, true);
+    io_ext_set_bit(IO_EXT_IO5_BIT, true);
     vTaskDelay(pdMS_TO_TICKS(5));
 
     twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NO_ACK);
@@ -673,9 +679,9 @@ void app_main(void)
     ota_init();
     discovery_init();
 
-    // Hardware init
+    // Hardware init (IO extension first — LCD and touch need it for reset)
+    io_ext_init();
     lcd_init();
-    ch422g_init();
     touch_init();
     lvgl_init();
 
@@ -684,9 +690,6 @@ void app_main(void)
 
     // EEZ Studio UI
     ui_init();
-
-    // Dimming overlay (must be created after ui_init so lv_layer_top exists)
-    create_dimming_overlay();
 
     // Load saved settings
     int32_t saved_brightness = 255, saved_timeout = 5, saved_theme = 0;
