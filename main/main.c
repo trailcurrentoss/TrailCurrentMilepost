@@ -9,7 +9,8 @@
 #include "esp_lcd_panel_rgb.h"
 #include "esp_lcd_touch_gt911.h"
 #include "esp_timer.h"
-#include "driver/i2c.h"
+#include "driver/gpio.h"
+#include "driver/i2c_master.h"
 #include "driver/twai.h"
 #include "nvs.h"
 #include "esp_ota_ops.h"
@@ -52,17 +53,18 @@ static const char *TAG = "milepost";
 #define IO_EXT_IO3_BIT  (1 << 3)   // LCD RST
 #define IO_EXT_IO5_BIT  (1 << 5)   // CAN_SEL
 
-#define I2C_PORT     I2C_NUM_0
 #define I2C_SDA_PIN  8
 #define I2C_SCL_PIN  9
 #define I2C_FREQ_HZ  400000
 
+static i2c_master_bus_handle_t i2c_bus = NULL;
+static i2c_master_dev_handle_t io_ext_dev = NULL;
 static uint8_t io_ext_out = 0;
 
 static esp_err_t io_ext_write_reg(uint8_t reg, uint8_t val)
 {
     uint8_t buf[2] = {reg, val};
-    return i2c_master_write_to_device(I2C_PORT, IO_EXT_ADDR, buf, 2, pdMS_TO_TICKS(100));
+    return i2c_master_transmit(io_ext_dev, buf, 2, pdMS_TO_TICKS(100));
 }
 
 static void io_ext_set_bit(uint8_t bit, bool high)
@@ -74,23 +76,30 @@ static void io_ext_set_bit(uint8_t bit, bool high)
 
 static void io_ext_init(void)
 {
-    i2c_config_t conf = {
-        .mode = I2C_MODE_MASTER,
+    i2c_master_bus_config_t bus_cfg = {
+        .i2c_port = I2C_NUM_0,
         .sda_io_num = I2C_SDA_PIN,
         .scl_io_num = I2C_SCL_PIN,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = I2C_FREQ_HZ,
+        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .glitch_ignore_cnt = 7,
+        .flags.enable_internal_pullup = true,
     };
-    i2c_param_config(I2C_PORT, &conf);
-    i2c_driver_install(I2C_PORT, I2C_MODE_MASTER, 0, 0, 0);
+    ESP_ERROR_CHECK(i2c_new_master_bus(&bus_cfg, &i2c_bus));
+
+    i2c_device_config_t io_ext_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = IO_EXT_ADDR,
+        .scl_speed_hz = I2C_FREQ_HZ,
+    };
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(i2c_bus, &io_ext_cfg, &io_ext_dev));
 
     // Set all IO pins to output mode
     esp_err_t err = io_ext_write_reg(IO_EXT_REG_MODE, 0xFF);
     ESP_LOGI(TAG, "IO extension init %s", err == ESP_OK ? "OK" : "FAILED");
 
-    // Backlight on, LCD RST high, touch RST high, CAN_SEL=0 (USB mode)
-    io_ext_out = IO_EXT_IO1_BIT | IO_EXT_IO2_BIT | IO_EXT_IO3_BIT;
+    // Initialize all pins HIGH (matches Waveshare demo default).
+    // Specific pins are pulled low later as needed (e.g. CAN_SEL for USB mode).
+    io_ext_out = 0xFF;
     io_ext_write_reg(IO_EXT_REG_OUTPUT, io_ext_out);
 }
 
@@ -222,17 +231,48 @@ static void lcd_init(void)
 // ============================================================================
 static esp_lcd_touch_handle_t touch_handle = NULL;
 
+// Probe an I2C address using the new driver's built-in probe.
+static bool i2c_probe(uint8_t addr)
+{
+    return i2c_master_probe(i2c_bus, addr, pdMS_TO_TICKS(50)) == ESP_OK;
+}
+
 static void touch_init(void)
 {
-    // Pulse touch RST via IO extension IO1
-    io_ext_set_bit(IO_EXT_IO1_BIT, false);
-    vTaskDelay(pdMS_TO_TICKS(10));
-    io_ext_set_bit(IO_EXT_IO1_BIT, true);
+    // GT911 I2C address is selected by INT pin state at RST rising edge:
+    //   INT low  → 0x5D (default)
+    //   INT high → 0x14 (backup)
+    // Sequence from Waveshare demo: RST low 100ms, INT low 100ms, RST high, 200ms settle.
+    gpio_config_t int_cfg = {
+        .mode = GPIO_MODE_OUTPUT,
+        .pin_bit_mask = BIT64(4),
+    };
+    gpio_config(&int_cfg);
+
+    io_ext_set_bit(IO_EXT_IO1_BIT, false);   // RST low
     vTaskDelay(pdMS_TO_TICKS(100));
+    gpio_set_level(4, 0);                     // INT low → selects address 0x5D
+    vTaskDelay(pdMS_TO_TICKS(100));
+    io_ext_set_bit(IO_EXT_IO1_BIT, true);     // RST high (INT still low)
+    vTaskDelay(pdMS_TO_TICKS(200));
+    gpio_set_direction(4, GPIO_MODE_INPUT);   // Release INT for interrupt use
+
+    // Probe GT911 at both possible addresses
+    uint8_t gt911_addr = ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS;
+    if (!i2c_probe(0x5D)) {
+        if (i2c_probe(0x14)) {
+            gt911_addr = ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS_BACKUP;
+        } else {
+            ESP_LOGE(TAG, "GT911 not found at 0x5D or 0x14 — touch disabled");
+            return;
+        }
+    }
 
     esp_lcd_panel_io_handle_t tp_io_handle = NULL;
     esp_lcd_panel_io_i2c_config_t tp_io_config = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
-    ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c((esp_lcd_i2c_bus_handle_t)I2C_PORT, &tp_io_config, &tp_io_handle));
+    tp_io_config.dev_addr = gt911_addr;
+    tp_io_config.scl_speed_hz = I2C_FREQ_HZ;
+    ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus, &tp_io_config, &tp_io_handle));
 
     esp_lcd_touch_config_t tp_cfg = {
         .x_max = SCREEN_WIDTH,
@@ -246,7 +286,7 @@ static void touch_init(void)
         },
     };
     ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_gt911(tp_io_handle, &tp_cfg, &touch_handle));
-    ESP_LOGI(TAG, "GT911 touch initialized");
+    ESP_LOGI(TAG, "GT911 touch initialized at 0x%02X", gt911_addr);
 }
 
 // ============================================================================
@@ -279,6 +319,10 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
 
 static void lvgl_touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
 {
+    if (!touch_handle) {
+        data->state = LV_INDEV_STATE_REL;
+        return;
+    }
     esp_lcd_touch_read_data(touch_handle);
 
     esp_lcd_touch_point_data_t pt;

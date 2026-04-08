@@ -999,7 +999,7 @@ void create_screen_page_power_management() {
             lv_obj_t *obj = lv_obj_create(parent_obj);
             objects.panel_solar_input = obj;
             lv_obj_set_pos(obj, 10, 10);
-            lv_obj_set_size(obj, 222, 122);
+            lv_obj_set_size(obj, 289, 151);
             add_style_style_content_panel(obj);
             lv_obj_set_style_align(obj, LV_ALIGN_TOP_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_bg_color(obj, lv_color_hex(theme_colors[active_theme_index][3]), LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -1051,8 +1051,8 @@ void create_screen_page_power_management() {
             // PanelChargeType
             lv_obj_t *obj = lv_obj_create(parent_obj);
             objects.panel_charge_type = obj;
-            lv_obj_set_pos(obj, 11, -52);
-            lv_obj_set_size(obj, 221, 80);
+            lv_obj_set_pos(obj, 11, -66);
+            lv_obj_set_size(obj, 288, 108);
             add_style_style_content_panel(obj);
             lv_obj_set_style_align(obj, LV_ALIGN_LEFT_MID, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_bg_color(obj, lv_color_hex(theme_colors[active_theme_index][5]), LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -1077,7 +1077,7 @@ void create_screen_page_power_management() {
             lv_obj_t *obj = lv_obj_create(parent_obj);
             objects.panel_shore_power = obj;
             lv_obj_set_pos(obj, 11, -70);
-            lv_obj_set_size(obj, 221, 170);
+            lv_obj_set_size(obj, 288, 230);
             add_style_style_content_panel(obj);
             lv_obj_set_style_align(obj, LV_ALIGN_BOTTOM_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_bg_color(obj, lv_color_hex(theme_colors[active_theme_index][4]), LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -1142,8 +1142,8 @@ void create_screen_page_power_management() {
             // PanelPowerBatteryStats
             lv_obj_t *obj = lv_obj_create(parent_obj);
             objects.panel_power_battery_stats = obj;
-            lv_obj_set_pos(obj, -48, 11);
-            lv_obj_set_size(obj, 209, 400);
+            lv_obj_set_pos(obj, -47, 11);
+            lv_obj_set_size(obj, 287, 519);
             lv_obj_clear_flag(obj, LV_OBJ_FLAG_CLICKABLE|LV_OBJ_FLAG_CLICK_FOCUSABLE|LV_OBJ_FLAG_GESTURE_BUBBLE|LV_OBJ_FLAG_PRESS_LOCK|LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_SCROLL_CHAIN_HOR|LV_OBJ_FLAG_SCROLL_CHAIN_VER|LV_OBJ_FLAG_SCROLL_ELASTIC|LV_OBJ_FLAG_SCROLL_MOMENTUM|LV_OBJ_FLAG_SCROLL_WITH_ARROW|LV_OBJ_FLAG_SNAPPABLE);
             add_style_style_content_panel(obj);
             lv_obj_set_style_align(obj, LV_ALIGN_TOP_MID, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -1238,7 +1238,7 @@ void create_screen_page_power_management() {
             lv_obj_t *obj = lv_obj_create(parent_obj);
             objects.panel_power_remaining_time = obj;
             lv_obj_set_pos(obj, -4, 10);
-            lv_obj_set_size(obj, 328, 400);
+            lv_obj_set_size(obj, 399, 520);
             lv_obj_clear_flag(obj, LV_OBJ_FLAG_CLICKABLE|LV_OBJ_FLAG_CLICK_FOCUSABLE|LV_OBJ_FLAG_GESTURE_BUBBLE|LV_OBJ_FLAG_PRESS_LOCK|LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_SCROLL_CHAIN_HOR|LV_OBJ_FLAG_SCROLL_CHAIN_VER|LV_OBJ_FLAG_SCROLL_ELASTIC|LV_OBJ_FLAG_SCROLL_MOMENTUM|LV_OBJ_FLAG_SCROLL_WITH_ARROW|LV_OBJ_FLAG_SNAPPABLE);
             add_style_style_content_panel(obj);
             lv_obj_set_style_bg_color(obj, lv_color_hex(theme_colors[active_theme_index][3]), LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -1732,7 +1732,7 @@ void create_screen_page_settings() {
             lv_obj_t *obj = lv_tabview_create(parent_obj, LV_DIR_LEFT, 32);
             objects.obj15 = obj;
             lv_obj_set_pos(obj, 0, 0);
-            lv_obj_set_size(obj, 800, 420);
+            lv_obj_set_size(obj, 1024, 540);
             add_style_tab_view_default(obj);
             lv_obj_set_style_bg_color(obj, lv_color_hex(theme_colors[active_theme_index][4]), LV_PART_MAIN | LV_STATE_DEFAULT);
             {
