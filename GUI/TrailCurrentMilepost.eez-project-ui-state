@@ -1,6 +1,6 @@
 {
   "navigation": {
-    "selectedUserPageObject": "[TrailCurrentMilepost.eez-project]:/userPages/5",
+    "selectedUserPageObject": "[TrailCurrentMilepost.eez-project]:/userPages/0",
     "selectedUserWidgetObject": "[TrailCurrentMilepost.eez-project]:/userWidgets/0",
     "selectedStyleObject": "[TrailCurrentMilepost.eez-project]:/lvglStyles/styles/38",
     "subnavigationSelectedItems": {
@@ -212,10 +212,10 @@
                 {
                   "type": "tab",
                   "id": "#c596489a-f66d-42ea-96fe-e1fcd7b68cb6",
-                  "name": "PageSettings",
+                  "name": "PageHome",
                   "component": "editor",
                   "config": {
-                    "objectPath": "[TrailCurrentMilepost.eez-project]:/userPages/5",
+                    "objectPath": "[TrailCurrentMilepost.eez-project]:/userPages/0",
                     "permanent": false
                   },
                   "icon": "svg:page"
@@ -231,7 +231,8 @@
                   },
                   "icon": "svg:user_widget"
                 }
-              ]
+              ],
+              "active": true
             },
             {
               "type": "row",
@@ -251,8 +252,7 @@
                       "enableClose": false,
                       "icon": "svg:properties"
                     }
-                  ],
-                  "active": true
+                  ]
                 },
                 {
                   "type": "tabset",
@@ -1608,15 +1608,14 @@
     "[TrailCurrentMilepost.eez-project]:/userPages/2[flow-state]": {
       "selection": {
         "0": {
-          "5": {
-            "$selected": true
-          }
+          "4": {},
+          "5": {}
         }
       },
       "transform": {
         "translate": {
-          "x": -400,
-          "y": -240
+          "x": -330,
+          "y": -149
         },
         "scale": 0.75
       },
@@ -1652,9 +1651,11 @@
     "[TrailCurrentMilepost.eez-project]:/userPages/4[flow-state]": {
       "selection": {
         "0": {
-          "3": {
+          "0": {},
+          "2": {
             "$selected": true
-          }
+          },
+          "3": {}
         }
       },
       "transform": {
@@ -1674,15 +1675,20 @@
     "[TrailCurrentMilepost.eez-project]:/userPages/5[flow-state]": {
       "selection": {
         "0": {
-          "2": {
-            "$selected": true
-          }
+          "0": {
+            "0": {
+              "0": {
+                "$selected": true
+              }
+            }
+          },
+          "1": {}
         }
       },
       "transform": {
         "translate": {
-          "x": -400,
-          "y": -240
+          "x": -351,
+          "y": -291.5
         },
         "scale": 0.75
       },

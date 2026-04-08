@@ -141,6 +141,8 @@ typedef struct _objects_t {
     lv_obj_t *obj12;
     lv_obj_t *obj13;
     lv_obj_t *obj14;
+    lv_obj_t *obj15;
+    lv_obj_t *obj16;
     lv_obj_t *water_page_bottom_nav_bar;
     lv_obj_t *water_page_bottom_nav_bar__bottom_nav_bar_button_home;
     lv_obj_t *water_page_bottom_nav_bar__bottom_nav_bar_button_trailer;
@@ -148,8 +150,8 @@ typedef struct _objects_t {
     lv_obj_t *water_page_bottom_nav_bar__bottom_nav_bar_button_air_quality;
     lv_obj_t *water_page_bottom_nav_bar__bottom_nav_bar_button_water;
     lv_obj_t *water_page_bottom_nav_bar__bottom_nav_bar_button_settings;
-    lv_obj_t *obj15;
-    lv_obj_t *obj16;
+    lv_obj_t *obj17;
+    lv_obj_t *obj18;
     lv_obj_t *btn_theme_light;
     lv_obj_t *lbl_device08_status_ind_5;
     lv_obj_t *btn_theme_dark;
@@ -160,12 +162,6 @@ typedef struct _objects_t {
     lv_obj_t *button_screen_timeout_decrease;
     lv_obj_t *label_screen_timeout_value;
     lv_obj_t *button_screen_timeout_increase;
-    lv_obj_t *tab_connectivity;
-    lv_obj_t *button_scan_wifi;
-    lv_obj_t *roller_wifi_networks;
-    lv_obj_t *textarea_wifi_password;
-    lv_obj_t *button_connect_wifi;
-    lv_obj_t *label_wifi_connection_status;
     lv_obj_t *button_settings_demo_light_sequence_start;
     lv_obj_t *button_settings_demo_light_sequence_stop;
     lv_obj_t *label_time_zone_header;
@@ -173,7 +169,6 @@ typedef struct _objects_t {
     lv_obj_t *label_about_header;
     lv_obj_t *label_version_number;
     lv_obj_t *mcu_mac_address_value;
-    lv_obj_t *keyboard_password;
     lv_obj_t *settings_page_bottom_nav_bar;
     lv_obj_t *settings_page_bottom_nav_bar__bottom_nav_bar_button_home;
     lv_obj_t *settings_page_bottom_nav_bar__bottom_nav_bar_button_trailer;
