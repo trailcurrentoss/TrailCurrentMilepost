@@ -1178,6 +1178,19 @@ void app_main(void)
     extern void ui_bind_button_edit_keyboard(void);
     ui_bind_button_edit_keyboard();
 
+    // Populate About screen: firmware version and MAC address
+    {
+        const esp_app_desc_t *app = esp_app_get_description();
+        lv_label_set_text(objects.label_version_number, app->version);
+
+        uint8_t mac[6];
+        esp_read_mac(mac, ESP_MAC_WIFI_STA);
+        char mac_str[18];
+        snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        lv_label_set_text(objects.mcu_mac_address_value, mac_str);
+    }
+
     // Load saved settings
     int32_t saved_brightness = 255, saved_timeout = 5, saved_theme = 0;
     nvs_get_i32(nvs_settings, "brightness", &saved_brightness);
