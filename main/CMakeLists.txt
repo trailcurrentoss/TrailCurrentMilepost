@@ -6,6 +6,7 @@ idf_component_register(
         "ota.c"
         "discovery.c"
         "wifi_config.c"
+        "button_config.c"
         "ui/ui.c"
         "ui/screens.c"
         "ui/styles.c"

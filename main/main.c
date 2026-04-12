@@ -1,4 +1,6 @@
 #include <string.h>
+#include <time.h>
+#include <sys/time.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -22,6 +24,7 @@
 #include "include/wifi_config.h"
 #include "ui/vars.h"
 #include "ui/styles.h"
+#include "button_config.h"
 
 static const char *TAG = "milepost";
 
@@ -109,31 +112,63 @@ static void io_ext_init(void)
 // The CH32V003 caps at 97% duty to prevent the backlight from fully turning
 // off via PWM alone — use IO2 (backlight enable) for true off.
 // ============================================================================
-static uint8_t current_brightness = 255;
-static bool screen_timed_out = false;
+// Minimum user-settable brightness. The CH32V003 PWM is inverted —
+// brightness N maps to PWM (255-N) — so low numbers look almost black.
+// 32 still lets the user dim the screen aggressively while staying
+// clearly visible, so even a clamped value looks lit instead of dead.
+#define BRIGHTNESS_MIN_USER  32
 
-// Map brightness (0-255) to CH32V003 PWM register.
-// 255 = full bright, 0 = screen off (backlight disabled via IO2).
+// User's desired brightness. This is the source of truth for what the
+// screen SHOULD show when it's awake. The timeout code path NEVER writes
+// this variable — it only calls apply_brightness(0) directly to dim the
+// physical backlight while leaving `desired_brightness` untouched, so
+// waking the screen restores whatever the user last asked for.
+static uint8_t desired_brightness = 255;
+static bool    screen_timed_out   = false;
+
+// Wall-clock of the last wake-from-timeout event. actions.c reads this
+// via screen_wake_age_us() to ignore brightness-slider RELEASED events
+// that fire during a wake-tap so the user's stored brightness can't
+// be clobbered by a touch that was intended only to wake the screen.
+static int64_t s_last_wake_us = 0;
+int64_t screen_wake_age_us(void)
+{
+    return esp_timer_get_time() - s_last_wake_us;
+}
+
+// Map brightness (0-255) to CH32V003 PWM register. PWM-only — the IO2
+// backlight-enable pin is left high after boot and never toggled. We
+// tried cycling IO2 low to fully blank the screen on timeout and back
+// high to wake, but the CH32V003 dropped its latched PWM value across
+// that transition (even with PWM written before AND twice after the
+// IO2 high edge), so the backlight would never come back.
+//
+// With PWM only, the CH32V003 caps at 247/247 ≈ 97% duty on an inverted
+// driver — i.e. the screen never goes 100% dark on "timeout". It'll
+// glow at roughly 3% duty, which is very dim in a lit room and a faint
+// glow in the dark, but the wake path is 100% reliable because we're
+// just writing a new PWM value on a line that's already active.
 static void apply_brightness(uint8_t brightness)
 {
-    if (brightness == 0) {
-        // Fully off — kill backlight to save power
-        io_ext_set_bit(IO_EXT_IO2_BIT, false);
-        return;
-    }
-    // Ensure backlight is on
+    // Ensure backlight enable is on (only actually writes if the bit
+    // isn't already set — io_ext_set_bit is idempotent).
     io_ext_set_bit(IO_EXT_IO2_BIT, true);
 
-    // Invert: our brightness 255 = PWM 0 (full bright),
-    //         our brightness 1   = PWM 247 (dimmest safe)
-    uint8_t pwm_val = 255 - brightness;
+    // Invert: brightness 255 → PWM 0 (full bright),
+    //         brightness 0   → PWM 247 (dimmest we can achieve via PWM)
+    uint8_t pwm_val = (brightness >= 255) ? 0 : (uint8_t)(255 - brightness);
     if (pwm_val > 247) pwm_val = 247;
     io_ext_write_reg(IO_EXT_REG_PWM, pwm_val);
 }
 
+// Update the user's desired brightness AND (if the screen isn't currently
+// dimmed by the timeout logic) push it to the hardware. Called from the
+// brightness slider's PRESSING handler. Clamps to BRIGHTNESS_MIN_USER so
+// stray slider events during a wake-tap can't lock us out.
 void set_backlight(uint8_t brightness)
 {
-    current_brightness = brightness;
+    if (brightness < BRIGHTNESS_MIN_USER) brightness = BRIGHTNESS_MIN_USER;
+    desired_brightness = brightness;
     if (!screen_timed_out) {
         apply_brightness(brightness);
     }
@@ -141,7 +176,7 @@ void set_backlight(uint8_t brightness)
 
 uint8_t get_backlight(void)
 {
-    return current_brightness;
+    return desired_brightness;
 }
 
 // ============================================================================
@@ -384,31 +419,46 @@ static void lvgl_init(void)
 #define CAN_ID_OTA_TRIGGER        0x00
 #define CAN_ID_WIFI_CONFIG        0x01
 #define CAN_ID_DISCOVERY_TRIGGER  0x02
+#define CAN_ID_DATETIME           0x06
 #define CAN_ID_GPS_SAT_SPEED      0x07
-#define CAN_ID_GPS_ALTITUDE  0x08
-#define CAN_ID_TOGGLE        0x18
-#define CAN_ID_STATUS        0x1B
+#define CAN_ID_GPS_ALTITUDE       0x08
+#define CAN_ID_GPS_LATLON         0x09
 #define CAN_ID_TEMPERATURE   0x1F
 #define CAN_ID_BATT_SHUNT1   0x23
 #define CAN_ID_BATT_SHUNT2   0x24
 #define CAN_ID_SOLAR_MPPT1   0x2C
+#define CAN_ID_WATER_TANK_LEVELS 0x3E
 
-// Device state from PDM (updated from CAN RX task)
-volatile uint8_t g_device_pwm[8] = {0};
+// Button status flag — set when any mapped button's state changes
 volatile bool g_device_status_updated = false;
 
-// Temperature & humidity (CAN ID 0x1F)
+// Clock state (CAN 0x06 from Bearing) — UTC
+volatile uint16_t g_clock_year = 0;
+volatile uint8_t  g_clock_month = 0;
+volatile uint8_t  g_clock_day = 0;
+volatile uint8_t  g_clock_hour = 0;
+volatile uint8_t  g_clock_minute = 0;
+volatile uint8_t  g_clock_second = 0;
+volatile bool     g_datetime_updated = false;
+
+// Temperature & humidity + air quality (CAN ID 0x1F from Borealis)
+// Payload: [tempC_int8, tempF_uint8, hum_hi, hum_lo, tvoc_hi, tvoc_lo, eco2_hi, eco2_lo]
 volatile uint8_t  g_interior_temp_f = 0;
 volatile int8_t   g_interior_temp_c = 0;
 volatile uint16_t g_humidity_raw = 0;
+volatile uint16_t g_tvoc_ppb = 0;
+volatile uint16_t g_eco2_ppm = 0;
 volatile bool g_temperature_updated = false;
 
 // GPS (CAN IDs 0x07, 0x08)
 volatile uint8_t  g_gps_num_sats = 0;
 volatile uint8_t  g_gps_gnss_mode = 0;
 volatile uint32_t g_gps_altitude_raw = 0;
+volatile float    g_gps_latitude = 0.0f;
+volatile float    g_gps_longitude = 0.0f;
 volatile bool g_gps_sat_updated = false;
 volatile bool g_gps_alt_updated = false;
+volatile bool g_gps_latlon_updated = false;
 
 // Battery shunt (CAN IDs 0x23, 0x24)
 volatile uint8_t  g_batt_voltage_whole = 0;
@@ -427,61 +477,215 @@ volatile uint16_t g_solar_wattage = 0;
 volatile uint8_t  g_solar_charge_status = 0;
 volatile bool     g_solar_mppt1_updated = false;
 
+// Water tank levels from Reservoir (CAN ID 0x3E)
+volatile uint8_t  g_fresh_water_level = 0;
+volatile uint8_t  g_grey_water_level = 0;
+volatile uint8_t  g_black_water_level = 0;
+volatile bool     g_water_levels_updated = false;
 
+
+static void handle_can_frame(const twai_message_t *msg)
+{
+    if (msg->rtr) return;
+
+    // Per-frame debug trace — LOGD so it only shows when the log level
+    // is bumped to DEBUG. Keeps the default INFO stream readable.
+    ESP_LOGD(TAG, "CAN RX id=0x%03lX dlc=%u data=%02X %02X %02X %02X %02X %02X %02X %02X",
+             (unsigned long)msg->identifier,
+             (unsigned)msg->data_length_code,
+             msg->data[0], msg->data[1], msg->data[2], msg->data[3],
+             msg->data[4], msg->data[5], msg->data[6], msg->data[7]);
+
+    switch (msg->identifier) {
+    case CAN_ID_OTA_TRIGGER:
+        ota_handle_trigger(msg->data, msg->data_length_code);
+        return;
+    case CAN_ID_WIFI_CONFIG:
+        wifi_config_handle_can(msg->data, msg->data_length_code);
+        return;
+    case CAN_ID_DISCOVERY_TRIGGER:
+        discovery_handle_trigger();
+        return;
+    }
+
+    // Torrent status: 8 bytes, one PWM value per channel (one message per instance)
+    for (int inst = 0; inst < 3; inst++) {
+        if (msg->identifier == TORRENT_STATUS_ID[inst] && msg->data_length_code == 8) {
+            for (int btn = 0; btn < NUM_BUTTONS; btn++) {
+                if (g_buttons[btn].module_type == MOD_TORRENT &&
+                    g_buttons[btn].instance    == inst) {
+                    uint8_t ch = g_buttons[btn].channel;
+                    if (ch < 8) g_button_state[btn] = msg->data[ch];
+                }
+            }
+            g_device_status_updated = true;
+            return;
+        }
+    }
+
+    // Switchback status: 1-byte bitfield (bit N = relay N state)
+    for (int inst = 0; inst < 3; inst++) {
+        if (msg->identifier == SWITCHBACK_STATUS_ID[inst] && msg->data_length_code >= 1) {
+            uint8_t bits = msg->data[0];
+            for (int btn = 0; btn < NUM_BUTTONS; btn++) {
+                if (g_buttons[btn].module_type == MOD_SWITCHBACK &&
+                    g_buttons[btn].instance    == inst) {
+                    uint8_t ch = g_buttons[btn].channel;
+                    if (ch < 8) g_button_state[btn] = (bits >> ch) & 1;
+                }
+            }
+            g_device_status_updated = true;
+            return;
+        }
+    }
+
+    if (msg->identifier == CAN_ID_DATETIME && msg->data_length_code >= 7) {
+        g_clock_year   = ((uint16_t)msg->data[0] << 8) | msg->data[1];
+        g_clock_month  = msg->data[2];
+        g_clock_day    = msg->data[3];
+        g_clock_hour   = msg->data[4];
+        g_clock_minute = msg->data[5];
+        g_clock_second = msg->data[6];
+        g_datetime_updated = true;
+        return;
+    }
+
+    if (msg->identifier == CAN_ID_TEMPERATURE && msg->data_length_code >= 4) {
+        g_interior_temp_c = (int8_t)msg->data[0];
+        g_interior_temp_f = msg->data[1];
+        g_humidity_raw = ((uint16_t)msg->data[2] << 8) | msg->data[3];
+        if (msg->data_length_code >= 8) {
+            g_tvoc_ppb = ((uint16_t)msg->data[4] << 8) | msg->data[5];
+            g_eco2_ppm = ((uint16_t)msg->data[6] << 8) | msg->data[7];
+        }
+        g_temperature_updated = true;
+    } else if (msg->identifier == CAN_ID_GPS_SAT_SPEED && msg->data_length_code >= 6) {
+        g_gps_num_sats = msg->data[0];
+        g_gps_gnss_mode = msg->data[5];
+        g_gps_sat_updated = true;
+    } else if (msg->identifier == CAN_ID_GPS_ALTITUDE && msg->data_length_code >= 4) {
+        g_gps_altitude_raw = ((uint32_t)msg->data[0] << 24) |
+                             ((uint32_t)msg->data[1] << 16) |
+                             ((uint32_t)msg->data[2] << 8) |
+                             msg->data[3];
+        g_gps_alt_updated = true;
+    } else if (msg->identifier == CAN_ID_GPS_LATLON && msg->data_length_code >= 8) {
+        // Bearing 0x09: [lat_sign, lat2, lat1, lat0, lon_sign, lon2, lon1, lon0]
+        // where abs_value = ((b1<<16)|(b2<<8)|b3) and real = abs_value / 10000.
+        uint32_t lat_abs = ((uint32_t)msg->data[1] << 16) |
+                           ((uint32_t)msg->data[2] << 8)  |
+                            (uint32_t)msg->data[3];
+        uint32_t lon_abs = ((uint32_t)msg->data[5] << 16) |
+                           ((uint32_t)msg->data[6] << 8)  |
+                            (uint32_t)msg->data[7];
+        float lat = (float)lat_abs / 10000.0f;
+        float lon = (float)lon_abs / 10000.0f;
+        if (msg->data[0]) lat = -lat;
+        if (msg->data[4]) lon = -lon;
+        g_gps_latitude  = lat;
+        g_gps_longitude = lon;
+        g_gps_latlon_updated = true;
+    } else if (msg->identifier == CAN_ID_BATT_SHUNT1 && msg->data_length_code >= 7) {
+        g_batt_voltage_whole = msg->data[0];
+        g_batt_voltage_dec   = msg->data[1];
+        g_batt_soc_whole     = msg->data[5];
+        g_batt_soc_dec       = msg->data[6];
+        g_batt_shunt1_updated = true;
+    } else if (msg->identifier == CAN_ID_BATT_SHUNT2 && msg->data_length_code >= 5) {
+        g_is_wattage_negative = msg->data[0];
+        g_shunt_wattage = ((uint16_t)msg->data[1] << 8) | msg->data[2];
+        g_time_to_go_min = ((uint16_t)msg->data[3] << 8) | msg->data[4];
+        g_batt_shunt2_updated = true;
+    } else if (msg->identifier == CAN_ID_SOLAR_MPPT1 && msg->data_length_code >= 7) {
+        g_solar_wattage = ((uint16_t)msg->data[2] << 8) | msg->data[3];
+        g_solar_charge_status = msg->data[6];
+        g_solar_mppt1_updated = true;
+    } else if (msg->identifier == CAN_ID_WATER_TANK_LEVELS && msg->data_length_code >= 3) {
+        g_fresh_water_level = msg->data[0] > 100 ? 100 : msg->data[0];
+        g_grey_water_level  = msg->data[1] > 100 ? 100 : msg->data[1];
+        g_black_water_level = msg->data[2] > 100 ? 100 : msg->data[2];
+        g_water_levels_updated = true;
+        ESP_LOGI(TAG, "CAN 0x3E WaterTankLevels: fresh=%u%% grey=%u%% black=%u%% (raw: %02X %02X %02X dlc=%u)",
+                 (unsigned)g_fresh_water_level,
+                 (unsigned)g_grey_water_level,
+                 (unsigned)g_black_water_level,
+                 msg->data[0], msg->data[1], msg->data[2],
+                 (unsigned)msg->data_length_code);
+    }
+}
+
+// Alert-driven CAN task. Follows the pattern used by Switchback/Torrent/Borealis/
+// Bearing: twai_read_alerts() drives everything, bus-off is recovered via
+// twai_initiate_recovery() + TWAI_ALERT_BUS_RECOVERED + twai_start(). Milepost
+// has no periodic TX heartbeat, so there is no TX_ACTIVE/TX_PROBING state
+// machine — user-initiated can_send() calls are best-effort.
 static void can_rx_task(void *arg)
 {
-    twai_message_t msg;
+    uint32_t alerts = TWAI_ALERT_RX_DATA | TWAI_ALERT_ERR_PASS |
+                      TWAI_ALERT_BUS_ERROR | TWAI_ALERT_RX_QUEUE_FULL |
+                      TWAI_ALERT_BUS_OFF | TWAI_ALERT_BUS_RECOVERED |
+                      TWAI_ALERT_ERR_ACTIVE | TWAI_ALERT_TX_FAILED;
+    twai_reconfigure_alerts(alerts, NULL);
+
+    TickType_t last_status_log = xTaskGetTickCount();
+
     while (1) {
-        if (twai_receive(&msg, pdMS_TO_TICKS(100)) != ESP_OK) continue;
+        uint32_t triggered = 0;
+        twai_read_alerts(&triggered, pdMS_TO_TICKS(100));
 
-        if (msg.identifier == CAN_ID_OTA_TRIGGER) {
-            ota_handle_trigger(msg.data, msg.data_length_code);
+        // --- Bus error handling ---
+        if (triggered & TWAI_ALERT_BUS_OFF) {
+            ESP_LOGE(TAG, "TWAI bus-off, initiating recovery");
+            twai_initiate_recovery();
             continue;
         }
-
-        if (msg.identifier == CAN_ID_WIFI_CONFIG) {
-            wifi_config_handle_can(msg.data, msg.data_length_code);
-            continue;
+        if (triggered & TWAI_ALERT_BUS_RECOVERED) {
+            ESP_LOGI(TAG, "TWAI bus recovered, restarting");
+            twai_start();
+        }
+        if (triggered & TWAI_ALERT_ERR_PASS) {
+            ESP_LOGW(TAG, "TWAI error passive (no peers ACKing?)");
+        }
+        if (triggered & TWAI_ALERT_ERR_ACTIVE) {
+            ESP_LOGI(TAG, "TWAI error active (bus healthy)");
+        }
+        if (triggered & TWAI_ALERT_RX_QUEUE_FULL) {
+            ESP_LOGW(TAG, "TWAI RX queue full");
+        }
+        if (triggered & TWAI_ALERT_TX_FAILED) {
+            ESP_LOGW(TAG, "TWAI TX failed");
         }
 
-        if (msg.identifier == CAN_ID_DISCOVERY_TRIGGER) {
-            discovery_handle_trigger();
-            continue;
+        // --- Drain received messages ---
+        if (triggered & TWAI_ALERT_RX_DATA) {
+            twai_message_t msg;
+            while (twai_receive(&msg, 0) == ESP_OK) {
+                handle_can_frame(&msg);
+            }
         }
 
-        if (msg.identifier == CAN_ID_STATUS && msg.data_length_code == 8) {
-            for (int i = 0; i < 8; i++) g_device_pwm[i] = msg.data[i];
-            g_device_status_updated = true;
-        } else if (msg.identifier == CAN_ID_TEMPERATURE && msg.data_length_code >= 4) {
-            g_interior_temp_c = (int8_t)msg.data[0];
-            g_interior_temp_f = msg.data[1];
-            g_humidity_raw = ((uint16_t)msg.data[2] << 8) | msg.data[3];
-            g_temperature_updated = true;
-        } else if (msg.identifier == CAN_ID_GPS_SAT_SPEED && msg.data_length_code >= 6) {
-            g_gps_num_sats = msg.data[0];
-            g_gps_gnss_mode = msg.data[5];
-            g_gps_sat_updated = true;
-        } else if (msg.identifier == CAN_ID_GPS_ALTITUDE && msg.data_length_code >= 4) {
-            g_gps_altitude_raw = ((uint32_t)msg.data[0] << 24) |
-                                 ((uint32_t)msg.data[1] << 16) |
-                                 ((uint32_t)msg.data[2] << 8) |
-                                 msg.data[3];
-            g_gps_alt_updated = true;
-        } else if (msg.identifier == CAN_ID_BATT_SHUNT1 && msg.data_length_code >= 7) {
-            g_batt_voltage_whole = msg.data[0];
-            g_batt_voltage_dec   = msg.data[1];
-            g_batt_soc_whole     = msg.data[5];
-            g_batt_soc_dec       = msg.data[6];
-            g_batt_shunt1_updated = true;
-        } else if (msg.identifier == CAN_ID_BATT_SHUNT2 && msg.data_length_code >= 5) {
-            g_is_wattage_negative = msg.data[0];
-            g_shunt_wattage = ((uint16_t)msg.data[1] << 8) | msg.data[2];
-            g_time_to_go_min = ((uint16_t)msg.data[3] << 8) | msg.data[4];
-            g_batt_shunt2_updated = true;
-        } else if (msg.identifier == CAN_ID_SOLAR_MPPT1 && msg.data_length_code >= 7) {
-            g_solar_wattage = ((uint16_t)msg.data[2] << 8) | msg.data[3];
-            g_solar_charge_status = msg.data[6];
-            g_solar_mppt1_updated = true;
+        // --- Periodic bus health status (every 2s) for debugging ---
+        if ((xTaskGetTickCount() - last_status_log) >= pdMS_TO_TICKS(2000)) {
+            last_status_log = xTaskGetTickCount();
+            twai_status_info_t st;
+            if (twai_get_status_info(&st) == ESP_OK) {
+                const char *state_str =
+                    (st.state == TWAI_STATE_STOPPED)    ? "STOPPED" :
+                    (st.state == TWAI_STATE_RUNNING)    ? "RUNNING" :
+                    (st.state == TWAI_STATE_BUS_OFF)    ? "BUS_OFF" :
+                    (st.state == TWAI_STATE_RECOVERING) ? "RECOVER" : "?";
+                ESP_LOGI(TAG,
+                    "TWAI %s tec=%lu rec=%lu tx_fail=%lu rx_q=%lu rx_miss=%lu rx_ovr=%lu arb_lost=%lu bus_err=%lu",
+                    state_str,
+                    (unsigned long)st.tx_error_counter,
+                    (unsigned long)st.rx_error_counter,
+                    (unsigned long)st.tx_failed_count,
+                    (unsigned long)st.msgs_to_rx,
+                    (unsigned long)st.rx_missed_count,
+                    (unsigned long)st.rx_overrun_count,
+                    (unsigned long)st.arb_lost_count,
+                    (unsigned long)st.bus_error_count);
+            }
         }
     }
 }
@@ -493,7 +697,7 @@ static void can_init(void)
     io_ext_set_bit(IO_EXT_IO5_BIT, true);
     vTaskDelay(pdMS_TO_TICKS(5));
 
-    twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NO_ACK);
+    twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);
     g_config.rx_queue_len = 32;
     twai_timing_config_t t_config = TWAI_TIMING_CONFIG_500KBITS();
     twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
@@ -541,9 +745,9 @@ bool can_send(uint32_t id, const uint8_t *data, uint8_t len)
 // ============================================================================
 void update_device_status_indicators(bool force)
 {
-    static bool prev_on[8] = {false};
+    static bool prev_on[NUM_BUTTONS] = {false};
 
-    lv_obj_t *indicators[8] = {
+    lv_obj_t *indicators[NUM_BUTTONS] = {
         objects.lbl_device01_status_ind,
         objects.lbl_device02_status_ind,
         objects.lbl_device03_status_ind,
@@ -554,8 +758,8 @@ void update_device_status_indicators(bool force)
         objects.lbl_device08_status_ind,
     };
 
-    for (int i = 0; i < 8; i++) {
-        bool is_on = g_device_pwm[i] > 0;
+    for (int i = 0; i < NUM_BUTTONS; i++) {
+        bool is_on = g_button_state[i] > 0;
         if (force || is_on != prev_on[i]) {
             lv_obj_remove_local_style_prop(indicators[i],
                 LV_STYLE_TEXT_COLOR, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -572,31 +776,203 @@ void update_device_status_indicators(bool force)
 }
 
 // ============================================================================
-// Screen timeout
+// Clock (CAN 0x06 DateTime from Bearing)
 // ============================================================================
-static int64_t last_touch_us = 0;
+
+// POSIX TZ strings — index matches the DropDownSelectedTimeZone options:
+// "Alaska / Chicago, Illinois / Denver, Colorado / Hawaii / Los Angeles /
+// New York / Phoenix".
+static const char *TIMEZONE_POSIX[] = {
+    "AKST9AKDT,M3.2.0/2:00:00,M11.1.0/2:00:00",  // Alaska
+    "CST6CDT,M3.2.0/2:00:00,M11.1.0/2:00:00",    // Chicago
+    "MST7MDT,M3.2.0/2:00:00,M11.1.0/2:00:00",    // Denver
+    "HST10",                                      // Hawaii (no DST)
+    "PST8PDT,M3.2.0/2:00:00,M11.1.0/2:00:00",    // Los Angeles
+    "EST5EDT,M3.2.0/2:00:00,M11.1.0/2:00:00",    // New York
+    "MST7",                                       // Phoenix (no DST)
+};
+#define TIMEZONE_COUNT (sizeof(TIMEZONE_POSIX) / sizeof(TIMEZONE_POSIX[0]))
+
+static int32_t s_tz_index = 5;       // New York default
+static bool    s_system_time_set = false;
+
+// Apply the currently-selected POSIX TZ string to libc's time routines.
+static void apply_user_timezone(void)
+{
+    int idx = s_tz_index;
+    if (idx < 0 || idx >= (int)TIMEZONE_COUNT) idx = 0;
+    setenv("TZ", TIMEZONE_POSIX[idx], 1);
+    tzset();
+}
+
+// Seed the system clock from the most recent CAN 0x06 datetime frame.
+// Bearing's datetime is UTC from GNSS, so we interpret it as UTC.
+static void set_system_time_from_bearing(void)
+{
+    if (g_clock_year < 2020) return;  // wait for valid GNSS lock
+
+    // Convert UTC fields → epoch via mktime with TZ temporarily UTC
+    setenv("TZ", "UTC0", 1);
+    tzset();
+
+    struct tm tm_utc = {
+        .tm_year = g_clock_year - 1900,
+        .tm_mon  = g_clock_month - 1,
+        .tm_mday = g_clock_day,
+        .tm_hour = g_clock_hour,
+        .tm_min  = g_clock_minute,
+        .tm_sec  = g_clock_second,
+    };
+    time_t t = mktime(&tm_utc);
+    if (t <= 0) return;
+
+    struct timeval tv = { .tv_sec = t, .tv_usec = 0 };
+    settimeofday(&tv, NULL);
+    s_system_time_set = true;
+
+    // Restore user's chosen timezone for display
+    apply_user_timezone();
+}
+
+static const char *k_month_names[] = {
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+};
+
+// Memoized display state — reset via clock_invalidate_cache() when the
+// user changes timezone so the next update_clock_display() repaints.
+static int s_last_min  = -1;
+static int s_last_hour = -1;
+static int s_last_pm   = -1;
+static int s_last_mday = -1;
+
+static void clock_invalidate_cache(void)
+{
+    s_last_min = s_last_hour = s_last_pm = s_last_mday = -1;
+}
+
+static void update_clock_display(void)
+{
+    if (!s_system_time_set) return;
+
+    time_t now;
+    time(&now);
+    struct tm ti;
+    localtime_r(&now, &ti);
+
+    if (ti.tm_min != s_last_min) {
+        char min_buf[4];
+        snprintf(min_buf, sizeof(min_buf), "%02d", ti.tm_min);
+        lv_label_set_text(objects.lbl_time_minutes, min_buf);
+        s_last_min = ti.tm_min;
+    }
+    if (ti.tm_hour != s_last_hour) {
+        int h12 = ti.tm_hour % 12;
+        if (h12 == 0) h12 = 12;
+        char hour_buf[4];
+        snprintf(hour_buf, sizeof(hour_buf), "%d", h12);
+        lv_label_set_text(objects.lbl_time_hour, hour_buf);
+        s_last_hour = ti.tm_hour;
+
+        int pm = ti.tm_hour >= 12 ? 1 : 0;
+        if (pm != s_last_pm) {
+            lv_label_set_text(objects.lbl_time_am_pm, pm ? "PM" : "AM");
+            s_last_pm = pm;
+        }
+    }
+    if (ti.tm_mday != s_last_mday) {
+        char date_buf[32];
+        snprintf(date_buf, sizeof(date_buf), "%s %d, %d",
+                 k_month_names[ti.tm_mon], ti.tm_mday, ti.tm_year + 1900);
+        lv_label_set_text(objects.lbl_date, date_buf);
+        s_last_mday = ti.tm_mday;
+    }
+}
+
+// Public entry points so actions.c can drive TZ changes.
+void clock_set_timezone_index(int32_t idx)
+{
+    if (idx < 0 || idx >= (int)TIMEZONE_COUNT) return;
+    s_tz_index = idx;
+    apply_user_timezone();
+    clock_invalidate_cache();
+    update_clock_display();
+}
+
+int32_t clock_get_timezone_index(void) { return s_tz_index; }
+int32_t clock_get_timezone_count(void) { return (int32_t)TIMEZONE_COUNT; }
+
+// ============================================================================
+// Temperature unit (Fahrenheit / Celsius)
+// ============================================================================
+// vars.c's set_var_temperature_unit stores the raw int; this helper converts
+// a Fahrenheit reading into whatever unit the user currently wants to see.
+int32_t fahrenheit_to_display(int32_t temp_f)
+{
+    if (get_var_temperature_unit() == 1) {
+        return (temp_f - 32) * 5 / 9;
+    }
+    return temp_f;
+}
+
+const char *temperature_unit_suffix(void)
+{
+    return (get_var_temperature_unit() == 1) ? "\u00b0C" : "\u00b0F";
+}
+
+// ============================================================================
+// Screen timeout — Fireside pattern
+// ============================================================================
+// When the display has been inactive for N minutes, dim the backlight to 0
+// and drop a fullscreen CLICKABLE overlay onto lv_layer_top(). The overlay
+// absorbs the first touch after blanking so it can't accidentally trigger
+// an underlying widget (like the brightness slider on PageSettings), then
+// restores the backlight to the user's chosen level and destroys itself.
+//
+// Ported verbatim from TrailCurrentFireside's main loop (which has been
+// battle-tested). The only Milepost-specific change: we drive the PWM via
+// apply_brightness() / desired_brightness on the CH32V003 IO extender
+// instead of Fireside's bsp_display_brightness_set() BSP call.
+
+static lv_obj_t *s_wake_overlay = NULL;
+
+static void wake_touch_cb(lv_event_t *e)
+{
+    (void)e;
+    screen_timed_out = false;
+    apply_brightness(desired_brightness);
+    s_last_wake_us = esp_timer_get_time();
+    if (s_wake_overlay) {
+        lv_obj_del(s_wake_overlay);
+        s_wake_overlay = NULL;
+    }
+    ESP_LOGI(TAG, "wake: restored brightness %u", desired_brightness);
+}
 
 static void handle_screen_timeout(void)
 {
+    if (screen_timed_out) return;
+
     int32_t timeout_min = get_var_screen_timeout_value();
-    if (timeout_min > 0) {
-        uint32_t inactive_ms = lv_disp_get_inactive_time(NULL);
-        if (inactive_ms < 1000) {
-            last_touch_us = esp_timer_get_time();
-            if (screen_timed_out) {
-                screen_timed_out = false;
-                apply_brightness(current_brightness);
-            }
-        }
-        int64_t elapsed_us = esp_timer_get_time() - last_touch_us;
-        if (!screen_timed_out && elapsed_us >= (int64_t)timeout_min * 60000000LL) {
-            screen_timed_out = true;
-            apply_brightness(0);
-        }
-    } else if (screen_timed_out) {
-        screen_timed_out = false;
-        apply_brightness(current_brightness);
-    }
+    if (timeout_min <= 0) return;
+
+    uint32_t timeout_ms = (uint32_t)timeout_min * 60U * 1000U;
+    uint32_t inactive_ms = lv_disp_get_inactive_time(NULL);
+    if (inactive_ms < timeout_ms) return;
+
+    screen_timed_out = true;
+    apply_brightness(0);
+
+    // Fullscreen click-absorber overlay on the top layer so the first
+    // wake-tap can't reach any widget underneath it.
+    s_wake_overlay = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(s_wake_overlay);
+    lv_obj_set_size(s_wake_overlay, LV_PCT(100), LV_PCT(100));
+    lv_obj_add_flag(s_wake_overlay, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(s_wake_overlay, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(s_wake_overlay, wake_touch_cb, LV_EVENT_CLICKED, NULL);
+    ESP_LOGI(TAG, "timeout: dimming after %d min (desired=%u)",
+             (int)timeout_min, desired_brightness);
 }
 
 // ============================================================================
@@ -604,12 +980,29 @@ static void handle_screen_timeout(void)
 // ============================================================================
 static void update_ui_from_can(void)
 {
+    if (g_datetime_updated) {
+        g_datetime_updated = false;
+        if (!s_system_time_set) {
+            set_system_time_from_bearing();
+        }
+    }
+    // Tick the clock display at most once per second
+    static int64_t s_last_clock_tick_us = 0;
+    int64_t now_us_clock = esp_timer_get_time();
+    if (s_system_time_set && (now_us_clock - s_last_clock_tick_us) >= 500000) {
+        s_last_clock_tick_us = now_us_clock;
+        update_clock_display();
+    }
+
     if (g_device_status_updated) {
         g_device_status_updated = false;
         update_device_status_indicators(false);
         bool any_on = false;
-        for (int i = 0; i < 8; i++) {
-            if (g_device_pwm[i] > 0) { any_on = true; break; }
+        for (int i = 0; i < NUM_BUTTONS; i++) {
+            if (g_buttons[i].module_type != MOD_NONE && g_button_state[i] > 0) {
+                any_on = true;
+                break;
+            }
         }
         lv_label_set_text(objects.lbl_all_on_off, any_on ? "All Off" : "All On");
     }
@@ -617,18 +1010,20 @@ static void update_ui_from_can(void)
     if (g_temperature_updated) {
         g_temperature_updated = false;
         int32_t temp_f = (int32_t)g_interior_temp_f;
+
+        // vars.c setter paints the home thermostat + air quality temperature
+        // tile in the user's chosen unit.
         set_var_current_interior_temperature(temp_f);
-        lv_label_set_text_fmt(objects.label_current_interior_temperature, "%d", (int)temp_f);
-        lv_label_set_text_fmt(objects.label_temp_fahrenheit_value, "%d", (int)temp_f);
-        int arc_temp = (temp_f < 0) ? 0 : ((temp_f > 130) ? 130 : (int)temp_f);
-        lv_arc_set_value(objects.arc_temperature, arc_temp);
-        int celsius = (int)g_interior_temp_c;
-        lv_label_set_text_fmt(objects.label_temp_celsius_value, "%d \u00b0C", celsius);
+
+        // Humidity — PageAirQuality tile (legacy PageTrailer arcs are gone)
         int hum_whole = g_humidity_raw / 100;
-        int hum_frac  = (g_humidity_raw % 100) / 10;
-        lv_label_set_text_fmt(objects.label_humidity_value, "%d.%d", hum_whole, hum_frac);
-        int arc_hum = (hum_whole > 100) ? 100 : hum_whole;
-        lv_arc_set_value(objects.arc_humidity, arc_hum);
+        lv_label_set_text_fmt(objects.label_air_quality_humdity_value, "%d", hum_whole);
+
+        // Borealis sensor data: TVOC + eCO2 (bytes 4-7 of the 8-byte payload)
+        lv_label_set_text_fmt(objects.label_air_quality_tvoc_value, "%u",
+                              (unsigned)g_tvoc_ppb);
+        lv_label_set_text_fmt(objects.label_air_quality_co2_value, "%u",
+                              (unsigned)g_eco2_ppm);
     }
 
     if (g_gps_sat_updated) {
@@ -656,12 +1051,20 @@ static void update_ui_from_can(void)
         lv_label_set_text_fmt(objects.label_elevation_value, "%d", alt_ft);
     }
 
+    if (g_gps_latlon_updated) {
+        g_gps_latlon_updated = false;
+        // %+.4f: explicit leading sign, 4 decimal places (matches Bearing's
+        // × 10000 scaling). Max width: "-180.0000" = 9 chars.
+        lv_label_set_text_fmt(objects.label_latitude_value,  "%+.4f", (double)g_gps_latitude);
+        lv_label_set_text_fmt(objects.label_longitude_value, "%+.4f", (double)g_gps_longitude);
+    }
+
     if (g_batt_shunt1_updated) {
         g_batt_shunt1_updated = false;
-        lv_label_set_text_fmt(objects.label_battery_voltage, "%d.%02d",
+        lv_label_set_text_fmt(objects.label_battery_voltage_value, "%d.%02d",
             (int)g_batt_voltage_whole, (int)g_batt_voltage_dec);
         int soc = (int)g_batt_soc_whole;
-        lv_label_set_text_fmt(objects.label_power_battery_percentage, "%d", soc);
+        lv_label_set_text_fmt(objects.label_battery_soc_percent, "%d", soc);
         lv_bar_set_value(objects.bar_battery_soc, soc, LV_ANIM_OFF);
     }
 
@@ -669,15 +1072,15 @@ static void update_ui_from_can(void)
         g_batt_shunt2_updated = false;
         int watts = (int)g_shunt_wattage;
         if (g_is_wattage_negative == 0xFF) watts = -watts;
-        lv_label_set_text_fmt(objects.label_shunt_current_watts_used, "%d", watts);
+        lv_label_set_text_fmt(objects.label_battery_load_watts, "%d", watts);
         uint16_t ttg = g_time_to_go_min;
         if (ttg == 0xFFFF || ttg == 0) {
-            lv_label_set_text(objects.label_power_remaining_time_to_go_value, "-");
+            lv_label_set_text(objects.label_battery_time_to_go_hours, "-");
             lv_label_set_text(objects.label_time_to_go_measurement_type, "");
         } else {
             int hours = ttg / 60;
             int mins = ttg % 60;
-            lv_label_set_text_fmt(objects.label_power_remaining_time_to_go_value, "%d:%02d", hours, mins);
+            lv_label_set_text_fmt(objects.label_battery_time_to_go_hours, "%d:%02d", hours, mins);
             lv_label_set_text(objects.label_time_to_go_measurement_type, "Hrs");
         }
         int arc_val = (ttg > 2000) ? 2000 : (int)ttg;
@@ -686,7 +1089,7 @@ static void update_ui_from_can(void)
 
     if (g_solar_mppt1_updated) {
         g_solar_mppt1_updated = false;
-        lv_label_set_text_fmt(objects.label_solar_wattage, "%d", (int)g_solar_wattage);
+        lv_label_set_text_fmt(objects.label_solar_power_watts, "%d", (int)g_solar_wattage);
         const char *charge_str;
         switch (g_solar_charge_status) {
             case 0: charge_str = "Off";        break;
@@ -696,14 +1099,47 @@ static void update_ui_from_can(void)
             case 5: charge_str = "Float";      break;
             default: charge_str = "Unknown";   break;
         }
-        lv_label_set_text(objects.label_curent_charge_mode, charge_str);
+        lv_label_set_text(objects.label_solar_charge_state, charge_str);
+    }
+
+    // Water tank levels from Reservoir (CAN 0x3E).
+    // Reservoir transmits every 1000ms; if 3 expected intervals pass with no
+    // frame, treat the data as stale and show "- %" / empty bars.
+    static int64_t s_water_last_rx_ms = 0;
+    static bool    s_water_data_valid = false;
+    const int64_t  WATER_TIMEOUT_MS = 3000;
+    int64_t now_ms = esp_timer_get_time() / 1000;
+
+    if (g_water_levels_updated) {
+        g_water_levels_updated = false;
+        s_water_last_rx_ms = now_ms;
+        s_water_data_valid = true;
+        lv_bar_set_value(objects.bar_fresh_water_value, g_fresh_water_level, LV_ANIM_OFF);
+        lv_bar_set_value(objects.bar_grey_water_value,  g_grey_water_level,  LV_ANIM_OFF);
+        lv_bar_set_value(objects.bar_black_water_value, g_black_water_level, LV_ANIM_OFF);
+        lv_label_set_text_fmt(objects.label_fresh_water_value, "%u%%", (unsigned)g_fresh_water_level);
+        lv_label_set_text_fmt(objects.label_grey_water_value,  "%u%%", (unsigned)g_grey_water_level);
+        lv_label_set_text_fmt(objects.label_black_water_value, "%u%%", (unsigned)g_black_water_level);
+    } else if (s_water_data_valid && (now_ms - s_water_last_rx_ms) > WATER_TIMEOUT_MS) {
+        s_water_data_valid = false;
+        ESP_LOGW(TAG, "Water tank data stale (>%lldms since last 0x3E), invalidating",
+                 WATER_TIMEOUT_MS);
+        lv_bar_set_value(objects.bar_fresh_water_value, 0, LV_ANIM_OFF);
+        lv_bar_set_value(objects.bar_grey_water_value,  0, LV_ANIM_OFF);
+        lv_bar_set_value(objects.bar_black_water_value, 0, LV_ANIM_OFF);
+        lv_label_set_text(objects.label_fresh_water_value, "- %");
+        lv_label_set_text(objects.label_grey_water_value,  "- %");
+        lv_label_set_text(objects.label_black_water_value, "- %");
     }
 
     // Save settings to NVS when changed
     if (get_var_user_settings_changed()) {
-        nvs_set_i32(nvs_settings, "brightness", current_brightness);
+        nvs_set_i32(nvs_settings, "brightness", desired_brightness);
         nvs_set_i32(nvs_settings, "timeout", get_var_screen_timeout_value());
         nvs_set_i32(nvs_settings, "theme", get_var_selected_theme());
+        nvs_set_i32(nvs_settings, "tzIndex", s_tz_index);
+        nvs_set_i32(nvs_settings, "desiredTemp", get_var_desired_temperature());
+        nvs_set_i32(nvs_settings, "tempUnit", get_var_temperature_unit());
         nvs_commit(nvs_settings);
         set_var_user_settings_changed(false);
     }
@@ -732,8 +1168,15 @@ void app_main(void)
     // Confirm firmware is good (OTA rollback protection)
     esp_ota_mark_app_valid_cancel_rollback();
 
+    // Load button configuration BEFORE ui_init so apply_to_ui has real labels
+    // to write. ui_init creates the widgets — apply runs right after.
+    button_config_init();
+
     // EEZ Studio UI
     ui_init();
+    button_config_apply_to_ui();
+    extern void ui_bind_button_edit_keyboard(void);
+    ui_bind_button_edit_keyboard();
 
     // Load saved settings
     int32_t saved_brightness = 255, saved_timeout = 5, saved_theme = 0;
@@ -741,9 +1184,23 @@ void app_main(void)
     nvs_get_i32(nvs_settings, "timeout", &saved_timeout);
     nvs_get_i32(nvs_settings, "theme", &saved_theme);
 
-    current_brightness = (uint8_t)saved_brightness;
-    set_backlight(current_brightness);
-    int slider_pct = (current_brightness * 100) / 255;
+    // Load saved timezone index (default: New York)
+    int32_t saved_tz = 5;
+    nvs_get_i32(nvs_settings, "tzIndex", &saved_tz);
+    s_tz_index = saved_tz;
+    apply_user_timezone();
+    lv_dropdown_set_selected(objects.drop_down_selected_time_zone, (uint16_t)saved_tz);
+
+    // Load saved temperature unit (default: Fahrenheit)
+    int32_t saved_unit = 0;
+    nvs_get_i32(nvs_settings, "tempUnit", &saved_unit);
+    set_var_temperature_unit(saved_unit);
+
+    // Load from NVS via set_backlight so the clamp applies — protects
+    // against a corrupt value (e.g. a stuck-at-0 from an earlier build)
+    // locking the screen dark on boot.
+    set_backlight((uint8_t)saved_brightness);
+    int slider_pct = (desired_brightness * 100) / 255;
     lv_slider_set_value(objects.slider_screen_brightness, slider_pct, LV_ANIM_OFF);
 
     set_var_screen_timeout_value(saved_timeout);
@@ -759,30 +1216,45 @@ void app_main(void)
     // Load home screen instantly (override EEZ fade animation)
     lv_disp_load_scr(objects.page_home);
 
-    // Default all CAN-sourced labels to "-"
-    lv_label_set_text(objects.label_current_interior_temperature, "-");
-    lv_label_set_text(objects.label_current_exterior_temperature, "-");
-    lv_label_set_text(objects.label_temp_fahrenheit_value, "-");
-    lv_label_set_text(objects.label_temp_celsius_value, "- \u00b0C");
-    lv_label_set_text(objects.label_humidity_value, "-");
-    lv_arc_set_value(objects.arc_temperature, 0);
-    lv_arc_set_value(objects.arc_humidity, 0);
+    // Default all CAN-sourced labels to "-". PageAirQuality tiles are
+    // now on the Fireside-style 4-box layout (temp / humidity / TVOC / CO2).
+    lv_label_set_text(objects.label_air_quality_temperature_value, "--");
+    lv_label_set_text(objects.label_air_quality_humdity_value, "--");
+    lv_label_set_text(objects.label_air_quality_tvoc_value, "--");
+    lv_label_set_text(objects.label_air_quality_co2_value, "--");
     lv_label_set_text(objects.label_elevation_value, "-");
+    lv_label_set_text(objects.label_latitude_value,  "+0.0000");
+    lv_label_set_text(objects.label_longitude_value, "+0.0000");
     lv_label_set_text(objects.label_number_of_sats_value, "-");
     lv_label_set_text(objects.label_gps_mode_value, "-");
     lv_label_set_text(objects.label_front_level_value, "-");
     lv_label_set_text(objects.label_back_level_value, "-");
     lv_label_set_text(objects.label_left_side_level_value, "-");
     lv_label_set_text(objects.label_right_side_level_value, "-");
-    lv_label_set_text(objects.label_power_battery_percentage, "-");
-    lv_label_set_text(objects.label_battery_voltage, "-");
-    lv_label_set_text(objects.label_power_remaining_time_to_go_value, "-");
-    lv_label_set_text(objects.label_solar_wattage, "-");
-    lv_label_set_text(objects.label_curent_charge_mode, "-");
-    lv_label_set_text(objects.label_shunt_current_watts_used, "-");
+    lv_label_set_text(objects.label_battery_soc_percent, "-");
+    lv_label_set_text(objects.label_battery_voltage_value, "-");
+    lv_label_set_text(objects.label_battery_time_to_go_hours, "-");
+    lv_label_set_text(objects.label_solar_power_watts, "-");
+    lv_label_set_text(objects.label_solar_charge_state, "-");
+    lv_label_set_text(objects.label_battery_load_watts, "-");
     lv_label_set_text(objects.lbl_all_on_off, "All On");
 
-    last_touch_us = esp_timer_get_time();
+    // Clock placeholders until Bearing sends CAN 0x06
+    lv_label_set_text(objects.lbl_time_hour,    "--");
+    lv_label_set_text(objects.lbl_time_minutes, "--");
+    lv_label_set_text(objects.lbl_time_am_pm,   "--");
+    lv_label_set_text(objects.lbl_date,         "-");
+
+    // Thermostat defaults — desired setpoint is a local UI-only value
+    // until an HVAC module is wired onto the CAN bus. Current interior
+    // temperature starts blank until CAN 0x1F arrives.
+    int32_t saved_desired = 72;
+    nvs_get_i32(nvs_settings, "desiredTemp", &saved_desired);
+    if (saved_desired < 35 || saved_desired > 100) saved_desired = 72;
+    set_var_desired_temperature(saved_desired);
+    lv_arc_set_value(objects.arc_thermostat, saved_desired);
+    lv_label_set_text_fmt(objects.label_desired_temperature_value, "%d", (int)saved_desired);
+    lv_label_set_text(objects.label_current_interior_temperature, "-");
 
     // Start CAN (switches GPIO19/20 from USB to CAN transceiver)
     can_init();

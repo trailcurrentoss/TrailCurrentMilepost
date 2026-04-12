@@ -220,7 +220,7 @@ void discovery_update_ui(void)
     if (!s_overlay) {
         s_overlay = lv_obj_create(lv_layer_top());
         lv_obj_remove_style_all(s_overlay);
-        lv_obj_set_size(s_overlay, 800, 480);
+        lv_obj_set_size(s_overlay, 1024, 600);
         lv_obj_set_style_bg_color(s_overlay, lv_color_black(), 0);
         lv_obj_set_style_bg_opa(s_overlay, LV_OPA_80, 0);
         lv_obj_clear_flag(s_overlay, LV_OBJ_FLAG_SCROLLABLE);

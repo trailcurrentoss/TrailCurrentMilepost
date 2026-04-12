@@ -32,7 +32,13 @@ enum FlowGlobalVariables {
     FLOW_GLOBAL_VARIABLE_CURRENT_TIME_ZONE_STRING = 12,
     FLOW_GLOBAL_VARIABLE_SCREEN_TIMEOUT_VALUE = 13,
     FLOW_GLOBAL_VARIABLE_SELECTED_THEME = 14,
-    FLOW_GLOBAL_VARIABLE_CURRENT_DEVICE_BRIGHTNESS_IDENTIFIER = 15
+    FLOW_GLOBAL_VARIABLE_CURRENT_DEVICE_BRIGHTNESS_IDENTIFIER = 15,
+    FLOW_GLOBAL_VARIABLE_EDIT_BTN_NUMBER = 16,
+    FLOW_GLOBAL_VARIABLE_EDIT_LABEL_TEXT = 17,
+    FLOW_GLOBAL_VARIABLE_EDIT_ICON_CODEPOINT = 18,
+    FLOW_GLOBAL_VARIABLE_ASSIGN_MODULE_TYPE = 19,
+    FLOW_GLOBAL_VARIABLE_ASSIGN_INSTANCE = 20,
+    FLOW_GLOBAL_VARIABLE_TEMPERATURE_UNIT = 21
 };
 
 // Native global variables
@@ -81,16 +87,18 @@ extern int32_t get_var_selected_theme();
 extern void set_var_selected_theme(int32_t value);
 extern int32_t get_var_current_device_brightness_identifier();
 extern void set_var_current_device_brightness_identifier(int32_t value);
-extern int32_t get_var_wifi_scan_status();
-extern void set_var_wifi_scan_status(int32_t value);
-extern int32_t get_var_wifi_network_count();
-extern void set_var_wifi_network_count(int32_t value);
-extern int32_t get_var_selected_wifi_network_index();
-extern void set_var_selected_wifi_network_index(int32_t value);
-extern const char *get_var_selected_wifi_network_name();
-extern void set_var_selected_wifi_network_name(const char *value);
-extern int32_t get_var_wifi_connection_status();
-extern void set_var_wifi_connection_status(int32_t value);
+extern int32_t get_var_edit_btn_number();
+extern void set_var_edit_btn_number(int32_t value);
+extern const char *get_var_edit_label_text();
+extern void set_var_edit_label_text(const char *value);
+extern int32_t get_var_edit_icon_codepoint();
+extern void set_var_edit_icon_codepoint(int32_t value);
+extern int32_t get_var_assign_module_type();
+extern void set_var_assign_module_type(int32_t value);
+extern int32_t get_var_assign_instance();
+extern void set_var_assign_instance(int32_t value);
+extern int32_t get_var_temperature_unit();
+extern void set_var_temperature_unit(int32_t value);
 
 
 #ifdef __cplusplus
