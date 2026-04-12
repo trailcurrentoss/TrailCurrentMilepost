@@ -426,6 +426,8 @@ static lv_obj_t *icon_slot(int i)
         case 77: return objects.btn_icon_slot77;
         case 78: return objects.btn_icon_slot78;
         case 79: return objects.btn_icon_slot79;
+        case 80: return objects.btn_icon_slot80;
+        case 81: return objects.btn_icon_slot81;
         default: return NULL;
     }
 }

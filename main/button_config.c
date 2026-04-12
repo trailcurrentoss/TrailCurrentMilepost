@@ -22,10 +22,10 @@ const uint32_t TORRENT_STATUS_ID[3]    = { 0x1B, 0x1C, 0x1D };
 const uint32_t SWITCHBACK_TOGGLE_ID[3] = { 0x25, 0x26, 0x27 };
 const uint32_t SWITCHBACK_STATUS_ID[3] = { 0x28, 0x29, 0x2A };
 
-// 80 curated FontAwesome codepoints. MUST match the order used by
-// eez_patch2.py when generating the BtnIconSlot00..79 buttons, because
-// slot N's click handler sends userData = CURATED_ICONS[N] and the
-// highlight logic walks this array in parallel with the slot buttons.
+// Curated FontAwesome codepoints. MUST match the order of the
+// BtnIconSlot00..NN buttons in the EEZ project, because slot N's click
+// handler sends userData = CURATED_ICONS[N] and the highlight logic walks
+// this array in parallel with the slot buttons.
 const uint16_t CURATED_ICONS[NUM_CURATED_ICONS] = {
     /* Lights & electrical */
     0xf7b6, 0xf0eb, 0xf185, 0xf186, 0xf0e7, 0xf1e6, 0xf240,
@@ -58,6 +58,8 @@ const uint16_t CURATED_ICONS[NUM_CURATED_ICONS] = {
     0xf3c5, 0xf041, 0xf072, 0xf135,
     /* Misc */
     0xf0ee, 0xf06b, 0xf1f8, 0xf065, 0xf1eb,
+    /* Added water drop and faucet at end so existing slot order is preserved */
+    0xf043, 0xe005,
 };
 
 btn_config_t     g_buttons[NUM_BUTTONS];

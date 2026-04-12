@@ -9,7 +9,7 @@ extern "C" {
 
 #define NUM_BUTTONS        8
 #define BTN_LABEL_MAX      24
-#define NUM_CURATED_ICONS  80
+#define NUM_CURATED_ICONS  82
 #define DEFAULT_ICON_CP    0xf7b6u   /* FontAwesome lightbulb-on */
 
 typedef enum {

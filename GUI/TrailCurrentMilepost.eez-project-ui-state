@@ -1,11 +1,11 @@
 {
   "navigation": {
-    "selectedUserPageObject": "[TrailCurrentMilepost.eez-project]:/userPages/1",
+    "selectedUserPageObject": "[TrailCurrentMilepost.eez-project]:/userPages/4",
     "selectedUserWidgetObject": "[TrailCurrentMilepost.eez-project]:/userWidgets/0",
     "selectedActionObject": "[TrailCurrentMilepost.eez-project]:/actions/0",
     "selectedStyleObject": "[TrailCurrentMilepost.eez-project]:/lvglStyles/styles/38",
     "selectedThemeObject": "[TrailCurrentMilepost.eez-project]:/themes/0",
-    "selectedFontObject": "[TrailCurrentMilepost.eez-project]:/fonts/0",
+    "selectedFontObject": "[TrailCurrentMilepost.eez-project]:/fonts/1",
     "subnavigationSelectedItems": {
       "variables-tab/sub-navigation/selected-item": "Global"
     }
@@ -196,10 +196,21 @@
               "type": "tabset",
               "id": "EDITORS",
               "weight": 49.986220347315374,
-              "selected": 2,
+              "selected": 3,
               "enableDeleteWhenEmpty": false,
               "enableClose": false,
               "children": [
+                {
+                  "type": "tab",
+                  "id": "#5045e93a-0b8b-4c43-abd8-bff499ef23dc",
+                  "name": "fa32",
+                  "component": "editor",
+                  "config": {
+                    "objectPath": "[TrailCurrentMilepost.eez-project]:/fonts/1",
+                    "permanent": true
+                  },
+                  "icon": "material:font_download"
+                },
                 {
                   "type": "tab",
                   "id": "#3b51cd83-24a5-44b2-9398-3565a23c68ed",
@@ -226,10 +237,10 @@
                 {
                   "type": "tab",
                   "id": "#c596489a-f66d-42ea-96fe-e1fcd7b68cb6",
-                  "name": "PageTrailer",
+                  "name": "PageWater",
                   "component": "editor",
                   "config": {
-                    "objectPath": "[TrailCurrentMilepost.eez-project]:/userPages/1",
+                    "objectPath": "[TrailCurrentMilepost.eez-project]:/userPages/4",
                     "permanent": false
                   },
                   "icon": "svg:page"
@@ -1630,6 +1641,12 @@
     "[TrailCurrentMilepost.eez-project]:/userPages/2[flow-state]": {
       "selection": {
         "0": {
+          "0": {},
+          "1": {
+            "0": {
+              "$selected": true
+            }
+          },
           "4": {},
           "5": {}
         }
@@ -1652,7 +1669,9 @@
       "selection": {
         "0": {
           "3": {
-            "$selected": true
+            "0": {
+              "$selected": true
+            }
           }
         }
       },
@@ -1673,12 +1692,15 @@
     "[TrailCurrentMilepost.eez-project]:/userPages/4[flow-state]": {
       "selection": {
         "0": {
-          "0": {},
-          "1": {},
+          "0": {
+            "3": {}
+          },
+          "1": {
+            "3": {}
+          },
           "2": {
-            "1": {
-              "$selected": true
-            }
+            "2": {},
+            "3": {}
           },
           "3": {}
         }
@@ -1703,9 +1725,11 @@
           "0": {
             "0": {
               "3": {
-                "$selected": true
-              },
-              "4": {}
+                "0": {
+                  "$selected": true
+                },
+                "1": {}
+              }
             }
           },
           "1": {}
@@ -1728,10 +1752,14 @@
     "[TrailCurrentMilepost.eez-project]:/userPages/6[flow-state]": {
       "selection": {
         "0": {
-          "5": {},
-          "6": {
-            "$selected": true
-          }
+          "5": {
+            "0": {
+              "0": {
+                "$selected": true
+              }
+            }
+          },
+          "6": {}
         }
       },
       "transform": {
