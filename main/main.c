@@ -14,6 +14,7 @@
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/twai.h"
+#include "can_common.h"
 #include "nvs.h"
 #include "esp_ota_ops.h"
 #include "lvgl.h"
@@ -621,11 +622,12 @@ static void handle_can_frame(const twai_message_t *msg)
 // machine — user-initiated can_send() calls are best-effort.
 static void can_rx_task(void *arg)
 {
-    uint32_t alerts = TWAI_ALERT_RX_DATA | TWAI_ALERT_ERR_PASS |
-                      TWAI_ALERT_BUS_ERROR | TWAI_ALERT_RX_QUEUE_FULL |
-                      TWAI_ALERT_BUS_OFF | TWAI_ALERT_BUS_RECOVERED |
-                      TWAI_ALERT_ERR_ACTIVE | TWAI_ALERT_TX_FAILED;
-    twai_reconfigure_alerts(alerts, NULL);
+    // Configure alerts BEFORE any bus activity so no error transitions are missed.
+    twai_reconfigure_alerts(CAN_COMMON_ALERTS, NULL);
+
+    // Alerts armed — one-shot broadcast at startup; NO repeat on BUS_RECOVERED
+    // (Milepost is RX-only — no TX_PROBING guard, so a repeat would cycle).
+    can_common_version_broadcast();
 
     TickType_t last_status_log = xTaskGetTickCount();
 
@@ -637,7 +639,7 @@ static void can_rx_task(void *arg)
         if (triggered & TWAI_ALERT_BUS_OFF) {
             ESP_LOGE(TAG, "TWAI bus-off, initiating recovery");
             twai_initiate_recovery();
-            continue;
+            // No continue — fall through so RX_DATA in the same poll is still processed.
         }
         if (triggered & TWAI_ALERT_BUS_RECOVERED) {
             ESP_LOGI(TAG, "TWAI bus recovered, restarting");
@@ -705,23 +707,7 @@ static void can_init(void)
     if (twai_driver_install(&g_config, &t_config, &f_config) == ESP_OK &&
         twai_start() == ESP_OK) {
         ESP_LOGI(TAG, "TWAI started on TX=%d RX=%d at 500kbps", CAN_TX_PIN, CAN_RX_PIN);
-
-        // Broadcast firmware version on CAN 0x04 at startup
-        {
-            uint8_t mac[6];
-            esp_read_mac(mac, ESP_MAC_WIFI_STA);
-            const esp_app_desc_t *app = esp_app_get_description();
-            unsigned maj = 0, min = 0, pat = 0;
-            sscanf(app->version, "%u.%u.%u", &maj, &min, &pat);
-            twai_message_t ver_msg = {
-                .identifier = 0x04,
-                .data_length_code = 6,
-                .data = { mac[3], mac[4], mac[5], maj, min, pat }
-            };
-            twai_transmit(&ver_msg, pdMS_TO_TICKS(50));
-            ESP_LOGI(TAG, "Version broadcast: %s (CAN 0x04)", app->version);
-        }
-
+        // Version broadcast is sent in can_rx_task() after alerts are armed.
         xTaskCreatePinnedToCore(can_rx_task, "can_rx", 4096, NULL, 5, NULL, 1);
     } else {
         ESP_LOGE(TAG, "TWAI initialization failed");

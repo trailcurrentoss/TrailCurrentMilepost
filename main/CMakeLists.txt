@@ -33,4 +33,5 @@ idf_component_register(
         app_update
         esp_netif
         esp_app_format
+        can_common
 )
