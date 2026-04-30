@@ -137,29 +137,31 @@ int64_t screen_wake_age_us(void)
     return esp_timer_get_time() - s_last_wake_us;
 }
 
-// Map brightness (0-255) to CH32V003 PWM register. PWM-only — the IO2
-// backlight-enable pin is left high after boot and never toggled. We
-// tried cycling IO2 low to fully blank the screen on timeout and back
-// high to wake, but the CH32V003 dropped its latched PWM value across
-// that transition (even with PWM written before AND twice after the
-// IO2 high edge), so the backlight would never come back.
-//
-// With PWM only, the CH32V003 caps at 247/247 ≈ 97% duty on an inverted
-// driver — i.e. the screen never goes 100% dark on "timeout". It'll
-// glow at roughly 3% duty, which is very dim in a lit room and a faint
-// glow in the dark, but the wake path is 100% reliable because we're
-// just writing a new PWM value on a line that's already active.
+// Map brightness (0-255) to CH32V003 PWM register. The CH32V003 firmware
+// drops its PWM value across an IO2 (backlight enable) low→high transition,
+// so on a fresh enable we have to assert IO2 high, wait for the chip to
+// settle, then re-write the PWM register. 50 ms is enough; less is racy.
+// When IO2 is already high (the common case) we skip the delay.
 static void apply_brightness(uint8_t brightness)
 {
-    // Ensure backlight enable is on (only actually writes if the bit
-    // isn't already set — io_ext_set_bit is idempotent).
+    bool io2_was_low = !(io_ext_out & IO_EXT_IO2_BIT);
     io_ext_set_bit(IO_EXT_IO2_BIT, true);
+    if (io2_was_low) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
 
     // Invert: brightness 255 → PWM 0 (full bright),
-    //         brightness 0   → PWM 247 (dimmest we can achieve via PWM)
+    //         brightness 0   → PWM 247 (CH32V003 caps at ~97% duty)
     uint8_t pwm_val = (brightness >= 255) ? 0 : (uint8_t)(255 - brightness);
     if (pwm_val > 247) pwm_val = 247;
     io_ext_write_reg(IO_EXT_REG_PWM, pwm_val);
+}
+
+// Drive the backlight enable line low — the panel goes truly dark.
+// Pair with apply_brightness() to bring it back.
+static void backlight_off(void)
+{
+    io_ext_set_bit(IO_EXT_IO2_BIT, false);
 }
 
 // Update the user's desired brightness AND (if the screen isn't currently
@@ -179,6 +181,7 @@ uint8_t get_backlight(void)
 {
     return desired_brightness;
 }
+
 
 // ============================================================================
 // NVS settings
@@ -947,7 +950,7 @@ static void handle_screen_timeout(void)
     if (inactive_ms < timeout_ms) return;
 
     screen_timed_out = true;
-    apply_brightness(0);
+    backlight_off();
 
     // Fullscreen click-absorber overlay on the top layer so the first
     // wake-tap can't reach any widget underneath it.
