@@ -998,97 +998,182 @@ static void update_ui_from_can(void)
 
     if (g_temperature_updated) {
         g_temperature_updated = false;
-        int32_t temp_f = (int32_t)g_interior_temp_f;
+        // Borealis is 1 Hz, so the redraw cost is modest, but the air-quality
+        // tile labels still re-rasterize their parent on every set. Cache and
+        // skip when unchanged. Unit changes go through set_var_temperature_unit
+        // which re-invokes set_var_current_interior_temperature directly, so
+        // gating temp_f here doesn't suppress unit-change repaints.
+        static int32_t s_last_temp_f = INT32_MIN;
+        static int     s_last_hum    = -1;
+        static int     s_last_tvoc   = -1;
+        static int     s_last_eco2   = -1;
 
-        // vars.c setter paints the home thermostat + air quality temperature
-        // tile in the user's chosen unit.
-        set_var_current_interior_temperature(temp_f);
+        int32_t temp_f = (int32_t)g_interior_temp_f;
+        if (temp_f != s_last_temp_f) {
+            // vars.c setter paints the home thermostat + air quality temperature
+            // tile in the user's chosen unit.
+            set_var_current_interior_temperature(temp_f);
+            s_last_temp_f = temp_f;
+        }
 
         // Humidity — PageAirQuality tile (legacy PageTrailer arcs are gone)
         int hum_whole = g_humidity_raw / 100;
-        lv_label_set_text_fmt(objects.label_air_quality_humdity_value, "%d", hum_whole);
+        if (hum_whole != s_last_hum) {
+            lv_label_set_text_fmt(objects.label_air_quality_humdity_value, "%d", hum_whole);
+            s_last_hum = hum_whole;
+        }
 
         // Borealis sensor data: TVOC + eCO2 (bytes 4-7 of the 8-byte payload)
-        lv_label_set_text_fmt(objects.label_air_quality_tvoc_value, "%u",
-                              (unsigned)g_tvoc_ppb);
-        lv_label_set_text_fmt(objects.label_air_quality_co2_value, "%u",
-                              (unsigned)g_eco2_ppm);
+        int tvoc = (int)g_tvoc_ppb;
+        if (tvoc != s_last_tvoc) {
+            lv_label_set_text_fmt(objects.label_air_quality_tvoc_value, "%u", (unsigned)tvoc);
+            s_last_tvoc = tvoc;
+        }
+        int eco2 = (int)g_eco2_ppm;
+        if (eco2 != s_last_eco2) {
+            lv_label_set_text_fmt(objects.label_air_quality_co2_value, "%u", (unsigned)eco2);
+            s_last_eco2 = eco2;
+        }
     }
 
+    // Bearing also broadcasts at ~30 Hz; memoize each label so we only redraw
+    // when the displayed value actually changes.
     if (g_gps_sat_updated) {
         g_gps_sat_updated = false;
-        lv_label_set_text_fmt(objects.label_number_of_sats_value, "%d", (int)g_gps_num_sats);
-        set_var_satellite_count((int32_t)g_gps_num_sats);
-        const char *mode_str;
-        switch (g_gps_gnss_mode) {
-            case 1: mode_str = "Gps";                    break;
-            case 2: mode_str = "Beidou";                 break;
-            case 3: mode_str = "Gps + Beidou";           break;
-            case 4: mode_str = "Glonass";                break;
-            case 5: mode_str = "Gps + Glonass";          break;
-            case 6: mode_str = "Beidou + Glonass";       break;
-            case 7: mode_str = "Gps + Beidou + Glonass"; break;
-            default: mode_str = "No Fix";                break;
+        static int s_last_num_sats = -1;
+        static int s_last_gnss_mode = -1;
+        int n = (int)g_gps_num_sats;
+        if (n != s_last_num_sats) {
+            lv_label_set_text_fmt(objects.label_number_of_sats_value, "%d", n);
+            set_var_satellite_count((int32_t)n);
+            s_last_num_sats = n;
         }
-        lv_label_set_text(objects.label_gps_mode_value, mode_str);
+        int mode = (int)g_gps_gnss_mode;
+        if (mode != s_last_gnss_mode) {
+            const char *mode_str;
+            switch (mode) {
+                case 1: mode_str = "Gps";                    break;
+                case 2: mode_str = "Beidou";                 break;
+                case 3: mode_str = "Gps + Beidou";           break;
+                case 4: mode_str = "Glonass";                break;
+                case 5: mode_str = "Gps + Glonass";          break;
+                case 6: mode_str = "Beidou + Glonass";       break;
+                case 7: mode_str = "Gps + Beidou + Glonass"; break;
+                default: mode_str = "No Fix";                break;
+            }
+            lv_label_set_text(objects.label_gps_mode_value, mode_str);
+            s_last_gnss_mode = mode;
+        }
     }
 
     if (g_gps_alt_updated) {
         g_gps_alt_updated = false;
+        static int s_last_alt_ft = INT32_MIN;
         double alt_m = (double)g_gps_altitude_raw * 0.01;
         int alt_ft = (int)(alt_m * 3.28084);
-        lv_label_set_text_fmt(objects.label_elevation_value, "%d", alt_ft);
+        if (alt_ft != s_last_alt_ft) {
+            lv_label_set_text_fmt(objects.label_elevation_value, "%d", alt_ft);
+            s_last_alt_ft = alt_ft;
+        }
     }
 
     if (g_gps_latlon_updated) {
         g_gps_latlon_updated = false;
         // %+.4f: explicit leading sign, 4 decimal places (matches Bearing's
         // × 10000 scaling). Max width: "-180.0000" = 9 chars.
-        lv_label_set_text_fmt(objects.label_latitude_value,  "%+.4f", (double)g_gps_latitude);
-        lv_label_set_text_fmt(objects.label_longitude_value, "%+.4f", (double)g_gps_longitude);
+        // Cache the scaled int (matches wire precision) to avoid fragile
+        // float-equality checks while still skipping unchanged values.
+        static int32_t s_last_lat_q4 = INT32_MIN;
+        static int32_t s_last_lon_q4 = INT32_MIN;
+        int32_t lat_q4 = (int32_t)(g_gps_latitude  * 10000.0f);
+        int32_t lon_q4 = (int32_t)(g_gps_longitude * 10000.0f);
+        if (lat_q4 != s_last_lat_q4) {
+            lv_label_set_text_fmt(objects.label_latitude_value,  "%+.4f", (double)g_gps_latitude);
+            s_last_lat_q4 = lat_q4;
+        }
+        if (lon_q4 != s_last_lon_q4) {
+            lv_label_set_text_fmt(objects.label_longitude_value, "%+.4f", (double)g_gps_longitude);
+            s_last_lon_q4 = lon_q4;
+        }
     }
 
+    // Solstice broadcasts the SmartShunt at ~30 Hz. The voltage/SOC labels are
+    // children of a rounded-corner Bar widget; if we re-set their text on every
+    // frame, each invalidation forces the bar's main+indicator to re-rasterize
+    // beneath the label, spiking CPU and producing visible flicker. Cache the
+    // last displayed value and only touch LVGL when it actually changes
+    // (same pattern as update_clock_display and update_device_status_indicators).
     if (g_batt_shunt1_updated) {
         g_batt_shunt1_updated = false;
-        lv_label_set_text_fmt(objects.label_battery_voltage_value, "%d.%02d",
-            (int)g_batt_voltage_whole, (int)g_batt_voltage_dec);
+        static int s_last_volt_whole = -1;
+        static int s_last_volt_dec   = -1;
+        static int s_last_soc        = -1;
+        int vw = (int)g_batt_voltage_whole;
+        int vd = (int)g_batt_voltage_dec;
+        if (vw != s_last_volt_whole || vd != s_last_volt_dec) {
+            lv_label_set_text_fmt(objects.label_battery_voltage_value, "%d.%02d", vw, vd);
+            s_last_volt_whole = vw;
+            s_last_volt_dec   = vd;
+        }
         int soc = (int)g_batt_soc_whole;
-        lv_label_set_text_fmt(objects.label_battery_soc_percent, "%d", soc);
-        lv_bar_set_value(objects.bar_battery_soc, soc, LV_ANIM_OFF);
+        if (soc != s_last_soc) {
+            lv_label_set_text_fmt(objects.label_battery_soc_percent, "%d", soc);
+            lv_bar_set_value(objects.bar_battery_soc, soc, LV_ANIM_OFF);
+            s_last_soc = soc;
+        }
     }
 
     if (g_batt_shunt2_updated) {
         g_batt_shunt2_updated = false;
+        static int s_last_watts = INT32_MIN;
+        static int s_last_ttg   = -1;
         int watts = (int)g_shunt_wattage;
         if (g_is_wattage_negative == 0xFF) watts = -watts;
-        lv_label_set_text_fmt(objects.label_battery_load_watts, "%d", watts);
-        uint16_t ttg = g_time_to_go_min;
-        if (ttg == 0xFFFF || ttg == 0) {
-            lv_label_set_text(objects.label_battery_time_to_go_hours, "-");
-            lv_label_set_text(objects.label_time_to_go_measurement_type, "");
-        } else {
-            int hours = ttg / 60;
-            int mins = ttg % 60;
-            lv_label_set_text_fmt(objects.label_battery_time_to_go_hours, "%d:%02d", hours, mins);
-            lv_label_set_text(objects.label_time_to_go_measurement_type, "Hrs");
+        if (watts != s_last_watts) {
+            lv_label_set_text_fmt(objects.label_battery_load_watts, "%d", watts);
+            s_last_watts = watts;
         }
-        int arc_val = (ttg > 2000) ? 2000 : (int)ttg;
-        lv_arc_set_value(objects.power_arc_remaining_hours, arc_val);
+        uint16_t ttg = g_time_to_go_min;
+        int ttg_key = (ttg == 0xFFFF || ttg == 0) ? -1 : (int)ttg;
+        if (ttg_key != s_last_ttg) {
+            if (ttg_key < 0) {
+                lv_label_set_text(objects.label_battery_time_to_go_hours, "-");
+                lv_label_set_text(objects.label_time_to_go_measurement_type, "");
+            } else {
+                int hours = ttg_key / 60;
+                int mins  = ttg_key % 60;
+                lv_label_set_text_fmt(objects.label_battery_time_to_go_hours, "%d:%02d", hours, mins);
+                lv_label_set_text(objects.label_time_to_go_measurement_type, "Hrs");
+            }
+            int arc_val = (ttg > 2000) ? 2000 : (int)ttg;
+            lv_arc_set_value(objects.power_arc_remaining_hours, arc_val);
+            s_last_ttg = ttg_key;
+        }
     }
 
     if (g_solar_mppt1_updated) {
         g_solar_mppt1_updated = false;
-        lv_label_set_text_fmt(objects.label_solar_power_watts, "%d", (int)g_solar_wattage);
-        const char *charge_str;
-        switch (g_solar_charge_status) {
-            case 0: charge_str = "Off";        break;
-            case 2: charge_str = "Fault";      break;
-            case 3: charge_str = "Bulk";       break;
-            case 4: charge_str = "Absorption"; break;
-            case 5: charge_str = "Float";      break;
-            default: charge_str = "Unknown";   break;
+        static int s_last_solar_watts  = -1;
+        static int s_last_charge_state = -1;
+        int sw = (int)g_solar_wattage;
+        if (sw != s_last_solar_watts) {
+            lv_label_set_text_fmt(objects.label_solar_power_watts, "%d", sw);
+            s_last_solar_watts = sw;
         }
-        lv_label_set_text(objects.label_solar_charge_state, charge_str);
+        int cs = (int)g_solar_charge_status;
+        if (cs != s_last_charge_state) {
+            const char *charge_str;
+            switch (cs) {
+                case 0: charge_str = "Off";        break;
+                case 2: charge_str = "Fault";      break;
+                case 3: charge_str = "Bulk";       break;
+                case 4: charge_str = "Absorption"; break;
+                case 5: charge_str = "Float";      break;
+                default: charge_str = "Unknown";   break;
+            }
+            lv_label_set_text(objects.label_solar_charge_state, charge_str);
+            s_last_charge_state = cs;
+        }
     }
 
     // Water tank levels from Reservoir (CAN 0x3E).

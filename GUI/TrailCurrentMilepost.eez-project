@@ -658,8 +658,8 @@
                       "type": "LVGLLabelWidget",
                       "left": 0,
                       "top": 55,
-                      "width": 128,
-                      "height": 90,
+                      "width": 95,
+                      "height": 54,
                       "customInputs": [],
                       "customOutputs": [],
                       "style": {
@@ -825,8 +825,8 @@
                       "type": "LVGLLabelWidget",
                       "left": 0,
                       "top": 55,
-                      "width": 128,
-                      "height": 90,
+                      "width": 95,
+                      "height": 54,
                       "customInputs": [],
                       "customOutputs": [],
                       "style": {
@@ -991,8 +991,8 @@
                       "type": "LVGLLabelWidget",
                       "left": 0,
                       "top": 55,
-                      "width": 128,
-                      "height": 90,
+                      "width": 76,
+                      "height": 54,
                       "customInputs": [],
                       "customOutputs": [],
                       "style": {
@@ -1157,8 +1157,8 @@
                       "type": "LVGLLabelWidget",
                       "left": 0,
                       "top": 55,
-                      "width": 128,
-                      "height": 90,
+                      "width": 76,
+                      "height": 54,
                       "customInputs": [],
                       "customOutputs": [],
                       "style": {
@@ -1323,8 +1323,8 @@
                       "type": "LVGLLabelWidget",
                       "left": 0,
                       "top": 55,
-                      "width": 128,
-                      "height": 90,
+                      "width": 72,
+                      "height": 54,
                       "customInputs": [],
                       "customOutputs": [],
                       "style": {
@@ -1489,8 +1489,8 @@
                       "type": "LVGLLabelWidget",
                       "left": 0,
                       "top": 55,
-                      "width": 128,
-                      "height": 90,
+                      "width": 77,
+                      "height": 54,
                       "customInputs": [],
                       "customOutputs": [],
                       "style": {
@@ -1655,8 +1655,8 @@
                       "type": "LVGLLabelWidget",
                       "left": 0,
                       "top": 55,
-                      "width": 128,
-                      "height": 90,
+                      "width": 75,
+                      "height": 54,
                       "customInputs": [],
                       "customOutputs": [],
                       "style": {
@@ -1821,8 +1821,8 @@
                       "type": "LVGLLabelWidget",
                       "left": 0,
                       "top": 55,
-                      "width": 128,
-                      "height": 90,
+                      "width": 78,
+                      "height": 54,
                       "customInputs": [],
                       "customOutputs": [],
                       "style": {
@@ -1928,8 +1928,8 @@
                       "type": "LVGLLabelWidget",
                       "left": 0,
                       "top": 55,
-                      "width": 128,
-                      "height": 90,
+                      "width": 74,
+                      "height": 27,
                       "customInputs": [],
                       "customOutputs": [],
                       "style": {
@@ -2521,8 +2521,8 @@
                   "type": "LVGLLabelWidget",
                   "left": 0,
                   "top": 0,
-                  "width": 100,
-                  "height": 80,
+                  "width": 37,
+                  "height": 52,
                   "customInputs": [],
                   "customOutputs": [],
                   "style": {
@@ -2623,8 +2623,8 @@
                   "type": "LVGLLabelWidget",
                   "left": 0,
                   "top": 0,
-                  "width": 100,
-                  "height": 80,
+                  "width": 37,
+                  "height": 52,
                   "customInputs": [],
                   "customOutputs": [],
                   "style": {
@@ -2725,8 +2725,8 @@
                   "type": "LVGLLabelWidget",
                   "left": 0,
                   "top": 0,
-                  "width": 100,
-                  "height": 80,
+                  "width": 81,
+                  "height": 52,
                   "customInputs": [],
                   "customOutputs": [],
                   "style": {
@@ -4119,7 +4119,7 @@
                   "type": "LVGLLabelWidget",
                   "left": 45,
                   "top": 10,
-                  "width": 44,
+                  "width": 90,
                   "height": 27,
                   "customInputs": [],
                   "customOutputs": [],
@@ -4134,7 +4134,7 @@
                   "identifier": "LabelElevationValue",
                   "leftUnit": "px",
                   "topUnit": "px",
-                  "widthUnit": "content",
+                  "widthUnit": "px",
                   "heightUnit": "content",
                   "children": [],
                   "widgetFlags": "CLICK_FOCUSABLE|GESTURE_BUBBLE|PRESS_LOCK|SCROLLABLE|SCROLL_CHAIN_HOR|SCROLL_CHAIN_VER|SCROLL_ELASTIC|SCROLL_MOMENTUM|SCROLL_WITH_ARROW|SNAPPABLE",
@@ -4152,14 +4152,15 @@
                     "definition": {
                       "MAIN": {
                         "DEFAULT": {
-                          "align": "TOP_LEFT"
+                          "align": "TOP_LEFT",
+                          "text_align": "RIGHT"
                         }
                       }
                     }
                   },
                   "group": "",
                   "groupIndex": 0,
-                  "text": "768",
+                  "text": "-",
                   "textType": "literal",
                   "longMode": "WRAP",
                   "recolor": false
@@ -4167,7 +4168,7 @@
                 {
                   "objID": "39e85eb9-1448-42c2-fe5d-a083335bae94",
                   "type": "LVGLLabelWidget",
-                  "left": 95,
+                  "left": 140,
                   "top": 10,
                   "width": 19,
                   "height": 27,
@@ -4271,7 +4272,7 @@
                   "type": "LVGLLabelWidget",
                   "left": -5,
                   "top": 10,
-                  "width": 30,
+                  "width": 9,
                   "height": 27,
                   "customInputs": [],
                   "customOutputs": [],
@@ -4312,7 +4313,7 @@
                   },
                   "group": "",
                   "groupIndex": 0,
-                  "text": "20",
+                  "text": "-",
                   "textType": "literal",
                   "longMode": "WRAP",
                   "recolor": false
@@ -4372,7 +4373,7 @@
                   "type": "LVGLLabelWidget",
                   "left": 1,
                   "top": -46,
-                  "width": 140,
+                  "width": 99,
                   "height": 27,
                   "customInputs": [],
                   "customOutputs": [],
@@ -4423,7 +4424,7 @@
                   "type": "LVGLLabelWidget",
                   "left": 338,
                   "top": -46,
-                  "width": 140,
+                  "width": 99,
                   "height": 27,
                   "customInputs": [],
                   "customOutputs": [],
@@ -5873,7 +5874,8 @@
                             "DEFAULT": {
                               "text_font": "MONTSERRAT_32",
                               "text_color": "ForegroundWhite",
-                              "align": "CENTER"
+                              "align": "CENTER",
+                              "text_align": "LEFT"
                             }
                           }
                         }
@@ -5888,9 +5890,9 @@
                     {
                       "objID": "35b90595-db38-4965-cf7f-4edd8f179f7b",
                       "type": "LVGLLabelWidget",
-                      "left": -10,
+                      "left": -25,
                       "top": -20,
-                      "width": 21,
+                      "width": 80,
                       "height": 35,
                       "customInputs": [],
                       "customOutputs": [],
@@ -5905,7 +5907,7 @@
                       "identifier": "LabelBatterySocPercent",
                       "leftUnit": "px",
                       "topUnit": "px",
-                      "widthUnit": "content",
+                      "widthUnit": "px",
                       "heightUnit": "content",
                       "children": [],
                       "widgetFlags": "CLICK_FOCUSABLE|GESTURE_BUBBLE|PRESS_LOCK|SCROLLABLE|SCROLL_CHAIN_HOR|SCROLL_CHAIN_VER|SCROLL_ELASTIC|SCROLL_MOMENTUM|SCROLL_WITH_ARROW|SNAPPABLE",
@@ -5925,14 +5927,15 @@
                             "DEFAULT": {
                               "align": "CENTER",
                               "text_color": "ForegroundWhite",
-                              "text_font": "MONTSERRAT_32"
+                              "text_font": "MONTSERRAT_32",
+                              "text_align": "RIGHT"
                             }
                           }
                         }
                       },
                       "group": "",
                       "groupIndex": 0,
-                      "text": "0",
+                      "text": "-",
                       "textType": "literal",
                       "longMode": "WRAP",
                       "recolor": false,
@@ -5941,9 +5944,9 @@
                     {
                       "objID": "8d4bebf0-bf79-4d1a-dfb6-5902534fca96",
                       "type": "LVGLLabelWidget",
-                      "left": -10,
+                      "left": -20,
                       "top": 30,
-                      "width": 21,
+                      "width": 90,
                       "height": 35,
                       "customInputs": [],
                       "customOutputs": [],
@@ -5958,7 +5961,7 @@
                       "identifier": "LabelBatteryVoltageValue",
                       "leftUnit": "px",
                       "topUnit": "px",
-                      "widthUnit": "content",
+                      "widthUnit": "px",
                       "heightUnit": "content",
                       "children": [],
                       "widgetFlags": "CLICK_FOCUSABLE|GESTURE_BUBBLE|PRESS_LOCK|SCROLLABLE|SCROLL_CHAIN_HOR|SCROLL_CHAIN_VER|SCROLL_ELASTIC|SCROLL_MOMENTUM|SCROLL_WITH_ARROW|SNAPPABLE",
@@ -5978,14 +5981,15 @@
                             "DEFAULT": {
                               "align": "CENTER",
                               "text_color": "ForegroundWhite",
-                              "text_font": "MONTSERRAT_32"
+                              "text_font": "MONTSERRAT_32",
+                              "text_align": "RIGHT"
                             }
                           }
                         }
                       },
                       "group": "",
                       "groupIndex": 0,
-                      "text": "0",
+                      "text": "-",
                       "textType": "literal",
                       "longMode": "WRAP",
                       "recolor": false,
@@ -5994,7 +5998,7 @@
                     {
                       "objID": "e24a6f1b-f993-45fe-aca3-21b025bbcf51",
                       "type": "LVGLLabelWidget",
-                      "left": 30,
+                      "left": 40,
                       "top": 30,
                       "width": 23,
                       "height": 35,
@@ -6030,7 +6034,8 @@
                           "MAIN": {
                             "DEFAULT": {
                               "text_font": "MONTSERRAT_32",
-                              "align": "CENTER"
+                              "align": "CENTER",
+                              "text_align": "LEFT"
                             }
                           }
                         }
