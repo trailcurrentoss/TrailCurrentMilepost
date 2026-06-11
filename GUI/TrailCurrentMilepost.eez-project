@@ -4373,7 +4373,7 @@
                   "type": "LVGLLabelWidget",
                   "left": 1,
                   "top": -46,
-                  "width": 99,
+                  "width": 9,
                   "height": 27,
                   "customInputs": [],
                   "customOutputs": [],
@@ -4414,7 +4414,7 @@
                   },
                   "group": "",
                   "groupIndex": 0,
-                  "text": "+0.0000",
+                  "text": "-",
                   "textType": "literal",
                   "longMode": "WRAP",
                   "recolor": false
@@ -6354,9 +6354,9 @@
                     {
                       "objID": "31d7d443-98b6-4e05-a1ff-3eac87f28f02",
                       "type": "LVGLLabelWidget",
-                      "left": -80,
+                      "left": -65,
                       "top": 0,
-                      "width": 55,
+                      "width": 65,
                       "height": 35,
                       "customInputs": [],
                       "customOutputs": [],
@@ -6371,7 +6371,7 @@
                       "identifier": "LabelTimeToGoMeasurementType",
                       "leftUnit": "px",
                       "topUnit": "px",
-                      "widthUnit": "content",
+                      "widthUnit": "px",
                       "heightUnit": "content",
                       "children": [],
                       "widgetFlags": "CLICK_FOCUSABLE|GESTURE_BUBBLE|PRESS_LOCK|SCROLLABLE|SCROLL_CHAIN_HOR|SCROLL_CHAIN_VER|SCROLL_ELASTIC|SCROLL_MOMENTUM|SCROLL_WITH_ARROW|SNAPPABLE",
@@ -6407,9 +6407,9 @@
                     {
                       "objID": "cc8cc4fd-2ec3-4949-875f-6ecfa2323801",
                       "type": "LVGLLabelWidget",
-                      "left": -5,
+                      "left": -35,
                       "top": 0,
-                      "width": 21,
+                      "width": 120,
                       "height": 35,
                       "customInputs": [],
                       "customOutputs": [],
@@ -6424,7 +6424,7 @@
                       "identifier": "LabelBatteryTimeToGoHours",
                       "leftUnit": "px",
                       "topUnit": "px",
-                      "widthUnit": "content",
+                      "widthUnit": "px",
                       "heightUnit": "content",
                       "children": [],
                       "widgetFlags": "",
@@ -6444,14 +6444,15 @@
                           "MAIN": {
                             "DEFAULT": {
                               "align": "CENTER",
-                              "pad_top": 0
+                              "pad_top": 0,
+                              "text_align": "RIGHT"
                             }
                           }
                         }
                       },
                       "group": "",
                       "groupIndex": 0,
-                      "text": "0",
+                      "text": "-",
                       "textType": "literal",
                       "longMode": "WRAP",
                       "recolor": false,

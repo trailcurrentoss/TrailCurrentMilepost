@@ -1424,8 +1424,8 @@ void create_screen_page_power_management() {
                             // LabelTimeToGoMeasurementType
                             lv_obj_t *obj = lv_label_create(parent_obj);
                             objects.label_time_to_go_measurement_type = obj;
-                            lv_obj_set_pos(obj, -80, 0);
-                            lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+                            lv_obj_set_pos(obj, -65, 0);
+                            lv_obj_set_size(obj, 65, LV_SIZE_CONTENT);
                             add_style_label_nav_text_alternate(obj);
                             lv_obj_set_style_align(obj, LV_ALIGN_RIGHT_MID, LV_PART_MAIN | LV_STATE_DEFAULT);
                             lv_obj_set_style_text_font(obj, &lv_font_montserrat_32, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -1435,13 +1435,14 @@ void create_screen_page_power_management() {
                             // LabelBatteryTimeToGoHours
                             lv_obj_t *obj = lv_label_create(parent_obj);
                             objects.label_battery_time_to_go_hours = obj;
-                            lv_obj_set_pos(obj, -5, 0);
-                            lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+                            lv_obj_set_pos(obj, -35, 0);
+                            lv_obj_set_size(obj, 120, LV_SIZE_CONTENT);
                             lv_obj_clear_flag(obj, LV_OBJ_FLAG_CLICK_FOCUSABLE|LV_OBJ_FLAG_GESTURE_BUBBLE|LV_OBJ_FLAG_PRESS_LOCK|LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_SCROLL_CHAIN_HOR|LV_OBJ_FLAG_SCROLL_CHAIN_VER|LV_OBJ_FLAG_SCROLL_ELASTIC|LV_OBJ_FLAG_SCROLL_MOMENTUM|LV_OBJ_FLAG_SCROLL_WITH_ARROW|LV_OBJ_FLAG_SNAPPABLE);
                             add_style_style_top_nav_text_normal(obj);
                             lv_obj_set_style_align(obj, LV_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
                             lv_obj_set_style_pad_top(obj, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-                            lv_label_set_text(obj, "0");
+                            lv_obj_set_style_text_align(obj, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN | LV_STATE_DEFAULT);
+                            lv_label_set_text(obj, "-");
                         }
                         {
                             // LabelPowerRemaining
