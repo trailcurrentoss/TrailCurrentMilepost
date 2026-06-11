@@ -943,7 +943,7 @@ void create_screen_page_trailer() {
                     add_style_label_default(obj);
                     lv_obj_set_style_align(obj, LV_ALIGN_BOTTOM_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
                     lv_obj_set_style_text_align(obj, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
-                    lv_label_set_text(obj, "+0.0000");
+                    lv_label_set_text(obj, "-");
                 }
                 {
                     // LabelLongitudeValue

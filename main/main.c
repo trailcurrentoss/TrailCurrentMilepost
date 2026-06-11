@@ -794,11 +794,24 @@ static void apply_user_timezone(void)
     tzset();
 }
 
-// Seed the system clock from the most recent CAN 0x06 datetime frame.
+static void clock_invalidate_cache(void);
+
+// Sync the system clock from the most recent CAN 0x06 datetime frame.
 // Bearing's datetime is UTC from GNSS, so we interpret it as UTC.
+// Called on every fresh frame: first message seeds the clock; subsequent
+// frames re-sync only when drift exceeds 2 s, so we both stay correct
+// across long sessions AND don't get yanked backward by 1 Hz GNSS ticks
+// arriving slightly after the local 1 Hz advance.
 static void set_system_time_from_bearing(void)
 {
-    if (g_clock_year < 2020) return;  // wait for valid GNSS lock
+    // Reject pre-fix garbage: GNSS modules can emit epoch (1970),
+    // factory defaults (2000), or stale years before lock.
+    if (g_clock_year < 2025 || g_clock_year > 2099) return;
+    if (g_clock_month < 1 || g_clock_month > 12) return;
+    if (g_clock_day   < 1 || g_clock_day   > 31) return;
+    if (g_clock_hour  > 23) return;
+    if (g_clock_minute > 59) return;
+    if (g_clock_second > 60) return;
 
     // Convert UTC fields → epoch via mktime with TZ temporarily UTC
     setenv("TZ", "UTC0", 1);
@@ -812,12 +825,26 @@ static void set_system_time_from_bearing(void)
         .tm_min  = g_clock_minute,
         .tm_sec  = g_clock_second,
     };
-    time_t t = mktime(&tm_utc);
-    if (t <= 0) return;
+    time_t gnss_epoch = mktime(&tm_utc);
+    if (gnss_epoch <= 0) {
+        apply_user_timezone();
+        return;
+    }
 
-    struct timeval tv = { .tv_sec = t, .tv_usec = 0 };
+    if (s_system_time_set) {
+        time_t now;
+        time(&now);
+        time_t diff = gnss_epoch > now ? gnss_epoch - now : now - gnss_epoch;
+        if (diff <= 2) {
+            apply_user_timezone();
+            return;
+        }
+    }
+
+    struct timeval tv = { .tv_sec = gnss_epoch, .tv_usec = 0 };
     settimeofday(&tv, NULL);
     s_system_time_set = true;
+    clock_invalidate_cache();
 
     // Restore user's chosen timezone for display
     apply_user_timezone();
@@ -971,9 +998,7 @@ static void update_ui_from_can(void)
 {
     if (g_datetime_updated) {
         g_datetime_updated = false;
-        if (!s_system_time_set) {
-            set_system_time_from_bearing();
-        }
+        set_system_time_from_bearing();
     }
     // Tick the clock display at most once per second
     static int64_t s_last_clock_tick_us = 0;
