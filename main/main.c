@@ -992,11 +992,6 @@ static void wake_touch_cb(lv_event_t *e)
         lv_obj_del(s_wake_overlay);
         s_wake_overlay = NULL;
     }
-    // Re-enable redraws (paired with the disable in handle_screen_timeout)
-    // and force a full repaint so any label content that changed while we
-    // were dim — and therefore wasn't invalidated — is brought current.
-    lv_disp_enable_invalidation(NULL, true);
-    lv_obj_invalidate(lv_scr_act());
     ESP_LOGI(TAG, "[wakediag] <<< wake_touch_cb EXIT (restored brightness %u)",
              desired_brightness);
 }
@@ -1045,17 +1040,6 @@ static void handle_screen_timeout(void)
     screen_timed_out = true;
     backlight_off();
 
-    // Suppress LVGL invalidation while the panel is dark. CAN frames keep
-    // arriving (water levels, datetime, etc.) and update labels via
-    // lv_label_set_text, which would normally enqueue redraws. The wake
-    // overlay is transparent, so those redraws run against the underlying
-    // widgets even though nothing is visible. Over ~30-60 min that churns
-    // lv_mem_buf until lv_mem_buf_get falls into the realloc() path and
-    // deadlocks the main task — the bug that required a power cycle to
-    // recover from. With invalidation off, label text still updates in
-    // memory but no redraw is scheduled, so the buffer pool stays quiet.
-    lv_disp_enable_invalidation(NULL, false);
-
     // Fullscreen click-absorber overlay on the top layer so the first
     // wake-tap can't reach any widget underneath it.
     s_wake_overlay = lv_obj_create(lv_layer_top());
@@ -1073,6 +1057,21 @@ static void handle_screen_timeout(void)
 // ============================================================================
 static void update_ui_from_can(void)
 {
+    // While the panel is dim, do not touch LVGL widgets. CAN frames are
+    // still being received and parsed by handle_can_frame (volatile flags
+    // and primitive state stay current), but generating label/bar updates
+    // here would enqueue redraws that fragment the lv_mem_buf pool, and
+    // over ~30-60 min that deadlocks the main task inside lv_mem_realloc.
+    // System time still needs to be set when a fresh datetime arrives so
+    // the clock is correct on wake — handle that one thing, then bail.
+    if (screen_timed_out) {
+        if (g_datetime_updated) {
+            g_datetime_updated = false;
+            set_system_time_from_bearing();
+        }
+        return;
+    }
+
     if (g_datetime_updated) {
         g_datetime_updated = false;
         set_system_time_from_bearing();
