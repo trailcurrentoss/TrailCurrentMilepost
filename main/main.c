@@ -68,14 +68,19 @@ static uint8_t io_ext_out = 0;
 static esp_err_t io_ext_write_reg(uint8_t reg, uint8_t val)
 {
     uint8_t buf[2] = {reg, val};
-    return i2c_master_transmit(io_ext_dev, buf, 2, pdMS_TO_TICKS(100));
+    esp_err_t err = i2c_master_transmit(io_ext_dev, buf, 2, pdMS_TO_TICKS(100));
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "[wakediag] CH32V003 I2C write FAILED reg=0x%02X val=0x%02X err=%s",
+                 reg, val, esp_err_to_name(err));
+    }
+    return err;
 }
 
-static void io_ext_set_bit(uint8_t bit, bool high)
+static esp_err_t io_ext_set_bit(uint8_t bit, bool high)
 {
     if (high) io_ext_out |= bit;
     else      io_ext_out &= ~bit;
-    io_ext_write_reg(IO_EXT_REG_OUTPUT, io_ext_out);
+    return io_ext_write_reg(IO_EXT_REG_OUTPUT, io_ext_out);
 }
 
 static void io_ext_init(void)
@@ -145,7 +150,12 @@ int64_t screen_wake_age_us(void)
 static void apply_brightness(uint8_t brightness)
 {
     bool io2_was_low = !(io_ext_out & IO_EXT_IO2_BIT);
-    io_ext_set_bit(IO_EXT_IO2_BIT, true);
+    ESP_LOGI(TAG, "[wakediag] apply_brightness(%u) io2_was_low=%d io_ext_out=0x%02X",
+             brightness, io2_was_low, io_ext_out);
+
+    esp_err_t io2_err = io_ext_set_bit(IO_EXT_IO2_BIT, true);
+    ESP_LOGI(TAG, "[wakediag]  IO2 high write -> %s", esp_err_to_name(io2_err));
+
     if (io2_was_low) {
         vTaskDelay(pdMS_TO_TICKS(50));
     }
@@ -154,14 +164,18 @@ static void apply_brightness(uint8_t brightness)
     //         brightness 0   → PWM 247 (CH32V003 caps at ~97% duty)
     uint8_t pwm_val = (brightness >= 255) ? 0 : (uint8_t)(255 - brightness);
     if (pwm_val > 247) pwm_val = 247;
-    io_ext_write_reg(IO_EXT_REG_PWM, pwm_val);
+    esp_err_t pwm_err = io_ext_write_reg(IO_EXT_REG_PWM, pwm_val);
+    ESP_LOGI(TAG, "[wakediag]  PWM write reg=0x05 val=%u -> %s",
+             pwm_val, esp_err_to_name(pwm_err));
 }
 
 // Drive the backlight enable line low — the panel goes truly dark.
 // Pair with apply_brightness() to bring it back.
 static void backlight_off(void)
 {
-    io_ext_set_bit(IO_EXT_IO2_BIT, false);
+    esp_err_t err = io_ext_set_bit(IO_EXT_IO2_BIT, false);
+    ESP_LOGI(TAG, "[wakediag] backlight_off IO2 low -> %s io_ext_out=0x%02X",
+             esp_err_to_name(err), io_ext_out);
 }
 
 // Update the user's desired brightness AND (if the screen isn't currently
@@ -362,7 +376,22 @@ static void lvgl_touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
         data->state = LV_INDEV_STATE_REL;
         return;
     }
-    esp_lcd_touch_read_data(touch_handle);
+    // Diagnostic: log GT911 I2C errors, throttled to 1 Hz so we don't spam.
+    // A persistent error stream after long sleep would point at a wedged
+    // touch chip / I2C bus as the wake-failure cause.
+    static int64_t s_last_err_log_us = 0;
+    static uint32_t s_err_count = 0;
+    esp_err_t rd_err = esp_lcd_touch_read_data(touch_handle);
+    if (rd_err != ESP_OK) {
+        s_err_count++;
+        int64_t now = esp_timer_get_time();
+        if (now - s_last_err_log_us > 1000000) {
+            s_last_err_log_us = now;
+            ESP_LOGW(TAG, "[wakediag] GT911 read_data err=%s (count=%lu since last log)",
+                     esp_err_to_name(rd_err), (unsigned long)s_err_count);
+            s_err_count = 0;
+        }
+    }
 
     esp_lcd_touch_point_data_t pt;
     uint8_t count = 0;
@@ -955,6 +984,7 @@ static lv_obj_t *s_wake_overlay = NULL;
 static void wake_touch_cb(lv_event_t *e)
 {
     (void)e;
+    ESP_LOGI(TAG, "[wakediag] >>> wake_touch_cb ENTERED (overlay click received)");
     screen_timed_out = false;
     apply_brightness(desired_brightness);
     s_last_wake_us = esp_timer_get_time();
@@ -962,11 +992,47 @@ static void wake_touch_cb(lv_event_t *e)
         lv_obj_del(s_wake_overlay);
         s_wake_overlay = NULL;
     }
-    ESP_LOGI(TAG, "wake: restored brightness %u", desired_brightness);
+    // Re-enable redraws (paired with the disable in handle_screen_timeout)
+    // and force a full repaint so any label content that changed while we
+    // were dim — and therefore wasn't invalidated — is brought current.
+    lv_disp_enable_invalidation(NULL, true);
+    lv_obj_invalidate(lv_scr_act());
+    ESP_LOGI(TAG, "[wakediag] <<< wake_touch_cb EXIT (restored brightness %u)",
+             desired_brightness);
+}
+
+// While screen is dimmed, periodically probe the I2C bus and log LVGL's
+// inactivity counter. This lets us tell, when wake fails, whether:
+//   - the main loop is still alive (status log keeps printing)
+//   - LVGL sees taps (inactive_ms resets to small values on touch)
+//   - GT911 is reachable (probe at 0x5D)
+//   - CH32V003 is reachable (probe at 0x24)
+// Each probe times out at 50ms — bounded stall even if a chip wedges.
+static void wakediag_periodic(void)
+{
+    if (!screen_timed_out) return;
+    static int64_t s_last_log_us = 0;
+    int64_t now = esp_timer_get_time();
+    if (now - s_last_log_us < 5000000) return;  // 5s cadence
+    s_last_log_us = now;
+
+    uint32_t inactive_ms = lv_disp_get_inactive_time(NULL);
+    bool ch32_ok = (i2c_master_probe(i2c_bus, IO_EXT_ADDR, pdMS_TO_TICKS(50)) == ESP_OK);
+    bool gt911_ok = (i2c_master_probe(i2c_bus, 0x5D, pdMS_TO_TICKS(50)) == ESP_OK) ||
+                    (i2c_master_probe(i2c_bus, 0x14, pdMS_TO_TICKS(50)) == ESP_OK);
+    int int_pin = gpio_get_level(4);
+    ESP_LOGI(TAG, "[wakediag] sleep_tick inactive_ms=%lu CH32V003=%s GT911=%s INT=%d io_ext_out=0x%02X",
+             (unsigned long)inactive_ms,
+             ch32_ok ? "OK" : "NACK",
+             gt911_ok ? "OK" : "NACK",
+             int_pin,
+             io_ext_out);
 }
 
 static void handle_screen_timeout(void)
 {
+    wakediag_periodic();
+
     if (screen_timed_out) return;
 
     int32_t timeout_min = get_var_screen_timeout_value();
@@ -979,6 +1045,17 @@ static void handle_screen_timeout(void)
     screen_timed_out = true;
     backlight_off();
 
+    // Suppress LVGL invalidation while the panel is dark. CAN frames keep
+    // arriving (water levels, datetime, etc.) and update labels via
+    // lv_label_set_text, which would normally enqueue redraws. The wake
+    // overlay is transparent, so those redraws run against the underlying
+    // widgets even though nothing is visible. Over ~30-60 min that churns
+    // lv_mem_buf until lv_mem_buf_get falls into the realloc() path and
+    // deadlocks the main task — the bug that required a power cycle to
+    // recover from. With invalidation off, label text still updates in
+    // memory but no redraw is scheduled, so the buffer pool stays quiet.
+    lv_disp_enable_invalidation(NULL, false);
+
     // Fullscreen click-absorber overlay on the top layer so the first
     // wake-tap can't reach any widget underneath it.
     s_wake_overlay = lv_obj_create(lv_layer_top());
@@ -987,7 +1064,7 @@ static void handle_screen_timeout(void)
     lv_obj_add_flag(s_wake_overlay, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(s_wake_overlay, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(s_wake_overlay, wake_touch_cb, LV_EVENT_CLICKED, NULL);
-    ESP_LOGI(TAG, "timeout: dimming after %d min (desired=%u)",
+    ESP_LOGI(TAG, "[wakediag] timeout: dimming after %d min (desired=%u)",
              (int)timeout_min, desired_brightness);
 }
 

@@ -197,9 +197,22 @@
               "type": "tabset",
               "id": "EDITORS",
               "weight": 57.8201443480492,
+              "selected": 1,
               "enableDeleteWhenEmpty": false,
               "enableClose": false,
               "children": [
+                {
+                  "type": "tab",
+                  "id": "#d7d999e8-99b0-4941-9833-7492b5f43e67",
+                  "name": "Settings",
+                  "component": "editor",
+                  "config": {
+                    "objectPath": "[TrailCurrentMilepost.eez-project]:/settings",
+                    "subObjectPath": "[TrailCurrentMilepost.eez-project]:/settings",
+                    "permanent": false
+                  },
+                  "icon": "material:settings"
+                },
                 {
                   "type": "tab",
                   "id": "#26be2e7a-7629-4464-a8f7-d9a6a1810883",
