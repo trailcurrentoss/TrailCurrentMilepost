@@ -340,6 +340,44 @@ static void touch_init(void)
     };
     ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_gt911(tp_io_handle, &tp_cfg, &touch_handle));
     ESP_LOGI(TAG, "GT911 touch initialized at 0x%02X", gt911_addr);
+
+    // One-shot GT911 health/config dump — read-only, init time only.
+    // A silent-touch fault (dead cable, wrong panel config) shows up here
+    // as either NACKs on these reads or as an X/Y max that disagrees with
+    // SCREEN_WIDTH/SCREEN_HEIGHT. We only log; correcting the config is
+    // out of scope and would risk overwriting a fine panel.
+    uint8_t pid[4]      = {0};   // 0x8140..0x8143 ASCII product ID
+    uint8_t cfg[5]      = {0};   // 0x8047 cfg ver | 0x8048/49 X max LSB/MSB | 0x804A/4B Y max LSB/MSB
+    uint8_t fw_res[4]   = {0};   // 0x8146/47 fw X res LSB/MSB | 0x8148/49 fw Y res LSB/MSB
+    esp_err_t r_pid = esp_lcd_panel_io_rx_param(tp_io_handle, 0x8140, pid,    sizeof(pid));
+    esp_err_t r_cfg = esp_lcd_panel_io_rx_param(tp_io_handle, 0x8047, cfg,    sizeof(cfg));
+    esp_err_t r_fwr = esp_lcd_panel_io_rx_param(tp_io_handle, 0x8146, fw_res, sizeof(fw_res));
+
+    if (r_pid == ESP_OK) {
+        ESP_LOGI(TAG, "GT911 PID='%c%c%c%c' (%02X %02X %02X %02X)",
+                 (pid[0] >= 0x20 && pid[0] < 0x7F) ? pid[0] : '?',
+                 (pid[1] >= 0x20 && pid[1] < 0x7F) ? pid[1] : '?',
+                 (pid[2] >= 0x20 && pid[2] < 0x7F) ? pid[2] : '?',
+                 (pid[3] >= 0x20 && pid[3] < 0x7F) ? pid[3] : '?',
+                 pid[0], pid[1], pid[2], pid[3]);
+    } else {
+        ESP_LOGW(TAG, "GT911 product ID read failed: %s", esp_err_to_name(r_pid));
+    }
+    if (r_cfg == ESP_OK && r_fwr == ESP_OK) {
+        uint16_t x_max = (uint16_t)cfg[1]    | ((uint16_t)cfg[2]    << 8);
+        uint16_t y_max = (uint16_t)cfg[3]    | ((uint16_t)cfg[4]    << 8);
+        uint16_t fw_x  = (uint16_t)fw_res[0] | ((uint16_t)fw_res[1] << 8);
+        uint16_t fw_y  = (uint16_t)fw_res[2] | ((uint16_t)fw_res[3] << 8);
+        ESP_LOGI(TAG, "GT911 cfg_ver=0x%02X x_max=%u y_max=%u fw_x_res=%u fw_y_res=%u panel=%dx%d",
+                 cfg[0], x_max, y_max, fw_x, fw_y, SCREEN_WIDTH, SCREEN_HEIGHT);
+        if (x_max != SCREEN_WIDTH || y_max != SCREEN_HEIGHT) {
+            ESP_LOGE(TAG, "GT911 output max %ux%u does NOT match panel %dx%d — expect clipped/dead regions; check touch cable and GT911 config",
+                     x_max, y_max, SCREEN_WIDTH, SCREEN_HEIGHT);
+        }
+    } else {
+        if (r_cfg != ESP_OK) ESP_LOGW(TAG, "GT911 config-reg read failed: %s", esp_err_to_name(r_cfg));
+        if (r_fwr != ESP_OK) ESP_LOGW(TAG, "GT911 fw-resolution read failed: %s", esp_err_to_name(r_fwr));
+    }
 }
 
 // ============================================================================
@@ -396,6 +434,25 @@ static void lvgl_touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
     esp_lcd_touch_point_data_t pt;
     uint8_t count = 0;
     if (esp_lcd_touch_get_data(touch_handle, &pt, &count, 1) == ESP_OK && count > 0) {
+        // Defensive clamp: LVGL 8 silently drops out-of-range pointer coords
+        // (hit-test miss with only an LV_LOG_WARN), so a flaky touch chip or
+        // corrupted GT911 config produces dead regions with no visible error.
+        // Clamp to panel bounds and warn (throttled) when the raw value was
+        // outside — pt.x/pt.y are uint16_t so only the upper bound can fault.
+        uint16_t raw_x = pt.x;
+        uint16_t raw_y = pt.y;
+        bool clamped = false;
+        if (pt.x >= SCREEN_WIDTH)  { pt.x = SCREEN_WIDTH  - 1; clamped = true; }
+        if (pt.y >= SCREEN_HEIGHT) { pt.y = SCREEN_HEIGHT - 1; clamped = true; }
+        if (clamped) {
+            static int64_t s_last_clamp_log_us = 0;
+            int64_t now = esp_timer_get_time();
+            if (now - s_last_clamp_log_us > 5000000) {
+                s_last_clamp_log_us = now;
+                ESP_LOGW(TAG, "GT911 coord out of range raw=(%u,%u) panel=%dx%d — clamped; check touch cable/GT911 config",
+                         (unsigned)raw_x, (unsigned)raw_y, SCREEN_WIDTH, SCREEN_HEIGHT);
+            }
+        }
         data->state = LV_INDEV_STATE_PR;
         data->point.x = pt.x;
         data->point.y = pt.y;

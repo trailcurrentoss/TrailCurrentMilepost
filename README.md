@@ -1,13 +1,13 @@
 # TrailCurrent Milepost
 
-Touchscreen display firmware for the Waveshare ESP32-S3-Touch-LCD-7 (V1.2) providing a wall-mounted control panel for the [TrailCurrent](https://trailcurrent.com) modular system.
+Touchscreen display firmware for the Waveshare ESP32-S3-Touch-LCD-7B providing a wall-mounted control panel for the [TrailCurrent](https://trailcurrent.com) modular system.
 
 ## Hardware
 
-- **Board:** Waveshare ESP32-S3-Touch-LCD-7 (V1.2)
+- **Board:** Waveshare ESP32-S3-Touch-LCD-7B
 - **MCU:** ESP32-S3-WROOM-1-N16R8 (16MB Flash, 8MB PSRAM)
-- **Display:** 7" 800x480 RGB565 IPS with GT911 capacitive touch
-- **IO Expander:** CH422G (backlight, touch reset, CAN/USB mux, SD CS)
+- **Display:** 7" 1024x600 RGB565 IPS with GT911 capacitive touch
+- **IO Expander:** CH32V003 MCU on I2C (backlight PWM/enable, touch reset, LCD reset, CAN/USB mux, SD CS)
 - **Interfaces:** CAN bus, RS485, I2C, UART, SD card, battery connector
 
 ## Features
@@ -44,6 +44,10 @@ idf.py -p /dev/ttyACM0 monitor
 ```
 
 Dependencies (LVGL 8.4, GT911 touch driver) are resolved automatically from the ESP Component Registry on first build.
+
+## Troubleshooting
+
+**Touch stops responding in only part of the screen.** Check the touch panel ribbon cable and the GT911 boot log before suspecting firmware. On boot the firmware logs `GT911 PID=...` and `GT911 cfg_ver=... x_max=... y_max=... panel=1024x600` — an X/Y max that disagrees with the panel size, or a failed register read, points at a config or wiring problem. Dead regions with **no** logged touch events (not even the throttled `GT911 coord out of range` warning from the runtime clamp) indicate a hardware/cable fault, since a config problem produces out-of-range coordinates that get clamped and logged, not silence.
 
 ## OTA Updates
 
