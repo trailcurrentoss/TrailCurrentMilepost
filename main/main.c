@@ -14,9 +14,12 @@
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/twai.h"
+#include "esp_intr_alloc.h"
 #include "can_common.h"
 #include "nvs.h"
 #include "esp_ota_ops.h"
+#include "esp_task_wdt.h"
+#include "esp_system.h"
 #include "lvgl.h"
 
 #include "ui/ui.h"
@@ -208,11 +211,21 @@ static nvs_handle_t nvs_settings;
 static esp_lcd_panel_handle_t panel_handle = NULL;
 static SemaphoreHandle_t vsync_sem = NULL;
 
+// Free-running vsync tally. If this stops advancing while the wakediag
+// 5s tick keeps printing, the RGB panel / GDMA bounce-buffer refill is
+// wedged (typically because a long ISR on core 0 starved the refill).
+static volatile uint32_t s_vsync_count = 0;
+
+// Count of lvgl_flush_cb() vsync-wait timeouts (bounded by pdMS_TO_TICKS(100)
+// in the flush cb). Zero here + advancing s_vsync_count = happy path.
+static volatile uint32_t s_flush_timeout_count = 0;
+
 // Called from ISR at each vertical blanking interval — signals safe to swap FB
 static IRAM_ATTR bool on_vsync(esp_lcd_panel_handle_t panel,
                                 const esp_lcd_rgb_panel_event_data_t *edata,
                                 void *user_ctx)
 {
+    s_vsync_count++;
     BaseType_t woken = pdFALSE;
     xSemaphoreGiveFromISR(vsync_sem, &woken);
     return woken == pdTRUE;
@@ -400,8 +413,23 @@ static lv_disp_drv_t disp_drv;
 static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_map)
 {
     if (lv_disp_flush_is_last(drv)) {
-        // Wait for the current frame to finish displaying (vsync)
-        xSemaphoreTake(vsync_sem, portMAX_DELAY);
+        // Bounded vsync wait — was portMAX_DELAY, which silently hung the
+        // main task (touch polling, wake overlay) whenever the RGB panel
+        // wedged. If the semaphore doesn't fire in 100 ms (~6 frames at
+        // ~60 Hz), log loudly (throttled to 1 Hz) and proceed with the
+        // swap anyway so the fault is observable and self-recovering.
+        if (xSemaphoreTake(vsync_sem, pdMS_TO_TICKS(100)) != pdTRUE) {
+            s_flush_timeout_count++;
+            static int64_t s_last_log_us = 0;
+            int64_t now = esp_timer_get_time();
+            if (now - s_last_log_us > 1000000) {
+                s_last_log_us = now;
+                ESP_LOGE(TAG,
+                    "[wakediag] lvgl_flush_cb vsync WAIT TIMEOUT (>100ms) count=%lu vsync=%lu",
+                    (unsigned long)s_flush_timeout_count,
+                    (unsigned long)s_vsync_count);
+            }
+        }
         // Swap DMA to read from the buffer LVGL just finished rendering
         esp_lcd_panel_draw_bitmap(panel_handle, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, color_map);
     }
@@ -695,7 +723,10 @@ static void handle_can_frame(const twai_message_t *msg)
         g_grey_water_level  = msg->data[1] > 100 ? 100 : msg->data[1];
         g_black_water_level = msg->data[2] > 100 ? 100 : msg->data[2];
         g_water_levels_updated = true;
-        ESP_LOGI(TAG, "CAN 0x3E WaterTankLevels: fresh=%u%% grey=%u%% black=%u%% (raw: %02X %02X %02X dlc=%u)",
+        // Was ESP_LOGI on every 0x3E frame — Reservoir sends at 1 Hz today,
+        // but any promiscuous filter + flood can saturate the UART with these.
+        // Demoted to LOGD; bump the log level if you need per-frame trace.
+        ESP_LOGD(TAG, "CAN 0x3E WaterTankLevels: fresh=%u%% grey=%u%% black=%u%% (raw: %02X %02X %02X dlc=%u)",
                  (unsigned)g_fresh_water_level,
                  (unsigned)g_grey_water_level,
                  (unsigned)g_black_water_level,
@@ -709,8 +740,41 @@ static void handle_can_frame(const twai_message_t *msg)
 // twai_initiate_recovery() + TWAI_ALERT_BUS_RECOVERED + twai_start(). Milepost
 // has no periodic TX heartbeat, so there is no TX_ACTIVE/TX_PROBING state
 // machine — user-initiated can_send() calls are best-effort.
+//
+// The task also owns twai_driver_install()/twai_start(): esp_intr_alloc()
+// pins the ISR to whichever core is running when the driver is installed,
+// so doing it here (pinned to core 1) keeps the TWAI ISR OFF core 0. Core 0
+// is where the RGB panel + GDMA bounce-buffer refill ISRs live; a busy CAN
+// bus at 500 kbps generates thousands of interrupts/sec, and every extra
+// microsecond spent servicing them on core 0 delays the bounce-buffer
+// refill, producing an RGB underrun / visible flicker / occasional wedge.
+static twai_general_config_t s_twai_g_config;
+static twai_timing_config_t  s_twai_t_config;
+static twai_filter_config_t  s_twai_f_config;
+static volatile bool         s_twai_installed = false;
+
 static void can_rx_task(void *arg)
 {
+    // --- Install + start the driver ON THIS CORE (core 1) ---
+    // Installing from app_main pinned the ISR to core 0. This task is
+    // pinned to core 1, so the ISR now allocates on core 1 too.
+    esp_err_t r = twai_driver_install(&s_twai_g_config, &s_twai_t_config, &s_twai_f_config);
+    if (r != ESP_OK) {
+        ESP_LOGE(TAG, "twai_driver_install failed on core 1: %s", esp_err_to_name(r));
+        vTaskDelete(NULL);
+        return;
+    }
+    r = twai_start();
+    if (r != ESP_OK) {
+        ESP_LOGE(TAG, "twai_start failed on core 1: %s", esp_err_to_name(r));
+        twai_driver_uninstall();
+        vTaskDelete(NULL);
+        return;
+    }
+    s_twai_installed = true;
+    ESP_LOGI(TAG, "TWAI started on TX=%d RX=%d at 500kbps (ISR pinned to core %d)",
+             CAN_TX_PIN, CAN_RX_PIN, xPortGetCoreID());
+
     // Configure alerts BEFORE any bus activity so no error transitions are missed.
     twai_reconfigure_alerts(CAN_COMMON_ALERTS, NULL);
 
@@ -788,19 +852,50 @@ static void can_init(void)
     io_ext_set_bit(IO_EXT_IO5_BIT, true);
     vTaskDelay(pdMS_TO_TICKS(5));
 
-    twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);
-    g_config.rx_queue_len = 32;
-    twai_timing_config_t t_config = TWAI_TIMING_CONFIG_500KBITS();
-    twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
+    // Prepare the configs here but do NOT install the driver yet — that
+    // happens inside can_rx_task, which is pinned to core 1, so the TWAI
+    // ISR allocates on core 1 (away from the RGB panel / GDMA ISRs on core 0).
+    // See the comment above can_rx_task for the full rationale.
+    s_twai_g_config = (twai_general_config_t)TWAI_GENERAL_CONFIG_DEFAULT(CAN_TX_PIN, CAN_RX_PIN, TWAI_MODE_NORMAL);
+    s_twai_g_config.rx_queue_len = 32;
+    // Place the TWAI ISR in IRAM so cache disables (NVS write, SPI flash op)
+    // can't push a full frame worth of pending events into a rx_missed. Also
+    // shaves microseconds off ISR entry, which matters when we're back-to-back
+    // servicing frames on a floody bus. Requires CONFIG_TWAI_ISR_IN_IRAM=y.
+    s_twai_g_config.intr_flags |= ESP_INTR_FLAG_IRAM;
+    s_twai_t_config = (twai_timing_config_t)TWAI_TIMING_CONFIG_500KBITS();
 
-    if (twai_driver_install(&g_config, &t_config, &f_config) == ESP_OK &&
-        twai_start() == ESP_OK) {
-        ESP_LOGI(TAG, "TWAI started on TX=%d RX=%d at 500kbps", CAN_TX_PIN, CAN_RX_PIN);
-        // Version broadcast is sent in can_rx_task() after alerts are armed.
-        xTaskCreatePinnedToCore(can_rx_task, "can_rx", 4096, NULL, 5, NULL, 1);
-    } else {
-        ESP_LOGE(TAG, "TWAI initialization failed");
-    }
+    // Hardware acceptance filter — accept only standard-frame (SFF) IDs in the
+    // range 0x000–0x03F. Rejected frames never reach the ISR, so a busy bus
+    // no longer generates ~4k interrupts/sec on core 0 for IDs we'd ignore
+    // anyway. Every ID handle_can_frame() cares about is in this window:
+    //   0x00  OTA_TRIGGER          0x1B/1C/1D  TORRENT_STATUS (button_config.c)
+    //   0x01  WIFI_CONFIG          0x1F        TEMPERATURE
+    //   0x02  DISCOVERY_TRIGGER    0x23/24     BATT_SHUNT1/2
+    //   0x06  DATETIME             0x28/29/2A  SWITCHBACK_STATUS (button_config.c)
+    //   0x07  GPS_SAT_SPEED        0x2C        SOLAR_MPPT1
+    //   0x08  GPS_ALTITUDE         0x3E        WATER_TANK_LEVELS
+    //   0x09  GPS_LATLON
+    //
+    // Single-filter, SFF layout (per Espressif TWAI docs):
+    //   bits 31..21 = 11-bit ID (ID10..ID0)
+    //   bit  20     = RTR
+    //   bits 15..8  = data byte 0     bits 7..0 = data byte 1
+    // mask: 1 = "don't care", 0 = "must match acceptance_code".
+    //
+    // We want ID10..ID6 (top 5 bits of the ID) = 0 → those live at bits 31..27
+    // of the acceptance word, so:
+    //   acceptance_code bits 31..27 = 0
+    //   acceptance_mask bits 31..27 = 0  (must match)
+    //   acceptance_mask bits 26..0  = 1  (don't care: low 6 ID bits, RTR, data)
+    //     = 0x07FFFFFF
+    // Any SFF with ID > 0x3F is dropped by hardware. EFF traffic is not on
+    // the TrailCurrent bus today; if it ever is, revisit this filter.
+    s_twai_f_config.acceptance_code = 0x00000000;
+    s_twai_f_config.acceptance_mask = 0x07FFFFFF;
+    s_twai_f_config.single_filter   = true;
+
+    xTaskCreatePinnedToCore(can_rx_task, "can_rx", 4096, NULL, 5, NULL, 1);
 }
 
 // ============================================================================
@@ -808,6 +903,9 @@ static void can_init(void)
 // ============================================================================
 bool can_send(uint32_t id, const uint8_t *data, uint8_t len)
 {
+    // Driver install now happens inside can_rx_task (see comment there);
+    // reject TX until it's up rather than logging INVALID_STATE from twai.
+    if (!s_twai_installed) return false;
     twai_message_t msg = {0};
     msg.identifier = id;
     msg.data_length_code = len;
@@ -1073,12 +1171,22 @@ static void wakediag_periodic(void)
     bool gt911_ok = (i2c_master_probe(i2c_bus, 0x5D, pdMS_TO_TICKS(50)) == ESP_OK) ||
                     (i2c_master_probe(i2c_bus, 0x14, pdMS_TO_TICKS(50)) == ESP_OK);
     int int_pin = gpio_get_level(4);
-    ESP_LOGI(TAG, "[wakediag] sleep_tick inactive_ms=%lu CH32V003=%s GT911=%s INT=%d io_ext_out=0x%02X",
+    // vsync_delta: number of RGB vsyncs since the previous sleep_tick log.
+    // If this is 0 (or nearly so) while the log keeps printing, the panel /
+    // GDMA bounce-buffer refill has been starved (ISR contention on core 0).
+    static uint32_t s_last_vsync_count = 0;
+    uint32_t vsync_now = s_vsync_count;
+    uint32_t vsync_delta = vsync_now - s_last_vsync_count;
+    s_last_vsync_count = vsync_now;
+    ESP_LOGI(TAG, "[wakediag] sleep_tick inactive_ms=%lu CH32V003=%s GT911=%s INT=%d io_ext_out=0x%02X vsync=%lu (+%lu/5s) flush_timeouts=%lu",
              (unsigned long)inactive_ms,
              ch32_ok ? "OK" : "NACK",
              gt911_ok ? "OK" : "NACK",
              int_pin,
-             io_ext_out);
+             io_ext_out,
+             (unsigned long)vsync_now,
+             (unsigned long)vsync_delta,
+             (unsigned long)s_flush_timeout_count);
 }
 
 static void handle_screen_timeout(void)
@@ -1382,6 +1490,36 @@ static void update_ui_from_can(void)
 // ============================================================================
 void app_main(void)
 {
+    // Boot banner — log the reset reason FIRST, before any other init.
+    // If the board is rebooting under load (silent panic, TWDT, brownout,
+    // etc.) this print is the only reliable way to tell them apart.
+    // Print with printf so the message is guaranteed to appear even if the
+    // ESP_LOG subsystem is somehow not ready yet on very early boot.
+    {
+        esp_reset_reason_t r = esp_reset_reason();
+        const char *name = "?";
+        switch (r) {
+            case ESP_RST_UNKNOWN:    name = "UNKNOWN";    break;
+            case ESP_RST_POWERON:    name = "POWERON";    break;
+            case ESP_RST_EXT:        name = "EXT_PIN";    break;
+            case ESP_RST_SW:         name = "SW";         break;
+            case ESP_RST_PANIC:      name = "PANIC";      break;
+            case ESP_RST_INT_WDT:    name = "INT_WDT";    break;
+            case ESP_RST_TASK_WDT:   name = "TASK_WDT";   break;
+            case ESP_RST_WDT:        name = "OTHER_WDT";  break;
+            case ESP_RST_DEEPSLEEP:  name = "DEEPSLEEP";  break;
+            case ESP_RST_BROWNOUT:   name = "BROWNOUT";   break;
+            case ESP_RST_SDIO:       name = "SDIO";       break;
+            case ESP_RST_USB:        name = "USB";        break;
+            case ESP_RST_JTAG:       name = "JTAG";       break;
+            case ESP_RST_EFUSE:      name = "EFUSE";      break;
+            case ESP_RST_PWR_GLITCH: name = "PWR_GLITCH"; break;
+            case ESP_RST_CPU_LOCKUP: name = "CPU_LOCKUP"; break;
+            default: break;
+        }
+        printf("\n\n[wakediag] ======== BOOT reset_reason=%d (%s) ========\n\n", (int)r, name);
+    }
+
     // WiFi config (handles NVS flash init and hostname from MAC)
     ESP_ERROR_CHECK(wifi_config_init());
     wifi_config_load();
@@ -1506,9 +1644,22 @@ void app_main(void)
 
     ESP_LOGI(TAG, "Initialization complete");
 
+    // Subscribe the main (LVGL) task to the Task WDT. If any of the calls
+    // below block for longer than CONFIG_ESP_TASK_WDT_TIMEOUT_S (5 s in
+    // sdkconfig), the WDT fires a backtrace pointing straight at where the
+    // main task is stuck — historically that was lvgl_flush_cb() waiting
+    // portMAX_DELAY on the vsync semaphore while the RGB panel was wedged.
+    // Only pin down this ONE task; the CAN task is a slow poller and the
+    // TWDT already watches idle on both cores per sdkconfig.
+    esp_err_t wdt_err = esp_task_wdt_add(NULL);
+    if (wdt_err != ESP_OK) {
+        ESP_LOGW(TAG, "[wakediag] esp_task_wdt_add(main)=%s", esp_err_to_name(wdt_err));
+    }
+
     // Main loop
     extern enum ScreensEnum get_active_screen_id(void);
     while (1) {
+        esp_task_wdt_reset();
         lv_timer_handler();
         tick_screen_by_id(get_active_screen_id());
         update_ui_from_can();

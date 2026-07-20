@@ -32,6 +32,21 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 # TWAI (CAN bus)
 CONFIG_TWAI_ERRATA_FIX_RX_FRAME_INVALID=y
 CONFIG_TWAI_ERRATA_FIX_RX_FIFO_CORRUPT=y
+# Place the TWAI ISR in IRAM so it isn't stalled by cache misses while
+# the RGB panel / GDMA is hammering PSRAM. Requires g_config.intr_flags
+# to include ESP_INTR_FLAG_IRAM at driver install (see can_init()).
+CONFIG_TWAI_ISR_IN_IRAM=y
+
+# Latency hardening for the RGB LCD + GDMA path.
+# The RGB panel + GDMA bounce-buffer refill ISRs run on the core that
+# installs them (core 0 here). Under heavy CAN traffic that same core
+# is servicing the TWAI ISR too. IRAM-safe ISRs keep firing even when
+# the flash cache is disabled (e.g. NVS writes); RESTART_IN_VSYNC lets
+# the panel self-heal after an underrun instead of latching a black
+# frame / shifted image until the next power cycle.
+CONFIG_LCD_RGB_ISR_IRAM_SAFE=y
+CONFIG_LCD_RGB_RESTART_IN_VSYNC=y
+CONFIG_GDMA_ISR_IRAM_SAFE=y
 
 # OTA rollback protection
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y

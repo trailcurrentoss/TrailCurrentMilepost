@@ -368,6 +368,10 @@ GPIO19/20.
 - The HTTP server listens on port 3232 — ensure no firewall is blocking it
 - Check the serial monitor for connection/upload error messages
 
+### Screen doesn't wake after long sleep, or wakes with flicker
+
+This was a known bug on the 7B board fixed in July 2026. See the "Screen doesn't wake after being asleep for a long time" entry in the [Milepost README Troubleshooting section](../README.md#troubleshooting) for the plain-language explanation. In short: the display's tight refill timing was being starved by CAN interrupts on the same CPU, causing the UI thread to freeze on a "frame done" signal that never arrived. The fix moves interrupts to fast memory and to a different CPU, lets the display self-heal, and adds a 100 ms safety timeout on the UI wait. If the bug appears to return after an ESP-IDF upgrade, check that `sdkconfig` still has `CONFIG_LCD_RGB_ISR_IRAM_SAFE=y`, `CONFIG_LCD_RGB_RESTART_IN_VSYNC=y`, `CONFIG_GDMA_ISR_IRAM_SAFE=y`, and `CONFIG_TWAI_ISR_IN_IRAM=y`.
+
 ---
 
 ## Pin Reference
