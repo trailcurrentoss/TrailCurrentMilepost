@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="#52a441">
+  <!-- Milepost: Trail signpost with two directional boards -->
+  <!-- Post -->
+  <rect x="244" y="100" width="24" height="340" rx="4"/>
+  <!-- Top sign pointing right -->
+  <path d="M268 130 L400 130 L430 160 L400 190 L268 190Z"/>
+  <!-- Bottom sign pointing left -->
+  <path d="M244 230 L112 230 L82 260 L112 290 L244 290Z"/>
+  <!-- Post cap -->
+  <circle cx="256" cy="100" r="20"/>
+  <!-- Base -->
+  <rect x="210" y="420" width="92" height="24" rx="4"/>
+</svg>

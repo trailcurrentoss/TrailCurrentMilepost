@@ -3,10 +3,8 @@
     "selectedUserPageObject": "[TrailCurrentMilepost.eez-project]:/userPages/0",
     "selectedUserWidgetObject": "[TrailCurrentMilepost.eez-project]:/userWidgets/0",
     "selectedActionObject": "[TrailCurrentMilepost.eez-project]:/actions/0",
-    "selectedStyleObject": "[TrailCurrentMilepost.eez-project]:/lvglStyles/styles/41",
     "selectedThemeObject": "[TrailCurrentMilepost.eez-project]:/themes/0",
     "selectedFontObject": "[TrailCurrentMilepost.eez-project]:/fonts/2",
-    "selectedBitmapObject": "[TrailCurrentMilepost.eez-project]:/bitmaps/1",
     "subnavigationSelectedItems": {
       "variables-tab/sub-navigation/selected-item": "Global"
     }
@@ -203,15 +201,14 @@
               "children": [
                 {
                   "type": "tab",
-                  "id": "#d7d999e8-99b0-4941-9833-7492b5f43e67",
-                  "name": "Settings",
+                  "id": "#85400ac5-5ac0-4e08-a53a-0229755092ec",
+                  "name": "TopBar",
                   "component": "editor",
                   "config": {
-                    "objectPath": "[TrailCurrentMilepost.eez-project]:/settings",
-                    "subObjectPath": "[TrailCurrentMilepost.eez-project]:/settings",
-                    "permanent": false
+                    "objectPath": "[TrailCurrentMilepost.eez-project]:/userWidgets/0",
+                    "permanent": true
                   },
-                  "icon": "material:settings"
+                  "icon": "svg:user_widget"
                 },
                 {
                   "type": "tab",
@@ -1530,9 +1527,7 @@
     "[TrailCurrentMilepost.eez-project]:/userWidgets/0[flow-state]": {
       "selection": {
         "0": {
-          "5": {
-            "$selected": true
-          }
+          "5": {}
         }
       },
       "transform": {
@@ -1581,15 +1576,8 @@
         "0": {
           "0": {},
           "1": {},
-          "2": {},
-          "3": {},
-          "4": {},
-          "5": {},
-          "6": {},
-          "7": {
-            "0": {
-              "0": {}
-            }
+          "2": {
+            "$selected": true
           }
         }
       },

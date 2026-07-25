@@ -7,28 +7,46 @@
 extern "C" {
 #endif
 
-extern void action_change_screen_brightness(lv_event_t * e);
-extern void action_change_screen(lv_event_t * e);
-extern void action_send_device_command(lv_event_t * e);
-extern void action_change_desired_temperature(lv_event_t * e);
-extern void action_change_fm_radio_station(lv_event_t * e);
-extern void action_go_to_preset(lv_event_t * e);
-extern void action_settings_selection_change(lv_event_t * e);
-extern void action_change_theme(lv_event_t * e);
-extern void action_timeout_changed(lv_event_t * e);
-extern void action_timezone_change(lv_event_t * e);
-extern void action_commit_mac_address_changes(lv_event_t * e);
-extern void action_set_device_brightness_level(lv_event_t * e);
-extern void action_show_device_brightness_dialog(lv_event_t * e);
-extern void action_close_dialog(lv_event_t * e);
-extern void action_all_on_off(lv_event_t * e);
+extern void action_nav_home(lv_event_t * e);
+extern void action_nav_trailer(lv_event_t * e);
+extern void action_nav_power(lv_event_t * e);
+extern void action_nav_water(lv_event_t * e);
+extern void action_nav_air(lv_event_t * e);
+extern void action_nav_settings(lv_event_t * e);
+extern void action_toggle_theme(lv_event_t * e);
+extern void action_toggle_device(lv_event_t * e);
+extern void action_set_temp_unit_f(lv_event_t * e);
+extern void action_set_temp_unit_c(lv_event_t * e);
+extern void action_set_power_variant(lv_event_t * e);
+extern void action_set_air_variant(lv_event_t * e);
+extern void action_select_power_metric(lv_event_t * e);
+extern void action_select_air_metric(lv_event_t * e);
+extern void action_toggle_pump(lv_event_t * e);
+extern void action_brightness_changed(lv_event_t * e);
+extern void action_timeout_up(lv_event_t * e);
+extern void action_timeout_down(lv_event_t * e);
+extern void action_set_timezone(lv_event_t * e);
+extern void action_reset_connection(lv_event_t * e);
+extern void action_factory_reset(lv_event_t * e);
+extern void action_wifi_scan(lv_event_t * e);
+extern void action_wifi_select(lv_event_t * e);
+extern void action_wifi_cancel_password(lv_event_t * e);
+extern void action_wifi_submit_password(lv_event_t * e);
+extern void action_open_alarms(lv_event_t * e);
+extern void action_alarms_back(lv_event_t * e);
+extern void action_toggle_battery_alarm(lv_event_t * e);
+extern void action_battery_threshold(lv_event_t * e);
 extern void action_navigate_to_button_edit(lv_event_t * e);
-extern void action_navigate_to_device_assign(lv_event_t * e);
 extern void action_select_button_icon(lv_event_t * e);
 extern void action_save_button_appearance(lv_event_t * e);
-extern void action_assign_channel(lv_event_t * e);
-extern void action_select_device_instance(lv_event_t * e);
-extern void action_temperature_unit_change(lv_event_t * e);
+extern void action_back_to_edit_buttons(lv_event_t * e);
+extern void action_open_edit_buttons(lv_event_t * e);
+extern void action_select_module(lv_event_t * e);
+extern void action_select_address(lv_event_t * e);
+extern void action_select_channel(lv_event_t * e);
+extern void action_show_factory_reset_confirm(lv_event_t * e);
+extern void action_cancel_factory_reset_confirm(lv_event_t * e);
+extern void action_wifi_toggle_password(lv_event_t * e);
 
 
 #ifdef __cplusplus
