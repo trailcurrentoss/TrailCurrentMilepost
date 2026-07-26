@@ -1,0 +1,8 @@
+dependencies:
+  idf:
+    version: ">=5.1.0"
+  lvgl/lvgl:
+    version: ">8.3.9,<9"  
+    override_path: "../components/lvgl_port/lvgl__lvgl"
+
+

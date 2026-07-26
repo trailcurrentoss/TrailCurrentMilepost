@@ -58,12 +58,18 @@
 static const char *TAG = "VARS";
 
 /* ============================================================
- * lv_label_set_text invalidates the widget unconditionally in LVGL 8,
- * even when the new string equals the old one. That's a hidden cost on
- * fan-out clusters like the six-topbar labels — a 5s poll would trigger
- * six redraws every tick on an otherwise idle screen. This helper reads
- * the label's current text and skips the set when nothing changed, so
- * the redraw only happens when the value actually moves.
+ * LVGL write dedup helpers.
+ *
+ * LVGL 8 setters (lv_label_set_text, lv_arc_set_value, lv_obj_add_state,
+ * lv_obj_set_style_*) invalidate the widget unconditionally, even when
+ * the new value equals the old one. Under CAN load, hot-path setters
+ * like push_device_states and set_var_battery_soc fire on every status
+ * frame — inflating LVGL's per-frame dirty region for zero visual gain,
+ * and starving the RGB DMA bounce-buffer refill ISR on PSRAM bandwidth
+ * (which presents as intermittent whole-screen vertical shifts).
+ *
+ * Every hot-path setter below routes through these helpers so redraws
+ * happen only when the value actually moves.
  * ============================================================ */
 #if __has_include("ui/screens.h")
 static inline void label_set_text_if_changed(lv_obj_t *lbl, const char *text) {
@@ -71,6 +77,34 @@ static inline void label_set_text_if_changed(lv_obj_t *lbl, const char *text) {
     const char *cur = lv_label_get_text(lbl);
     if (cur && strcmp(cur, text) == 0) return;
     lv_label_set_text(lbl, text);
+}
+
+static inline void arc_set_value_if_changed(lv_obj_t *arc, int16_t value) {
+    if (!arc) return;
+    if (lv_arc_get_value(arc) == value) return;
+    lv_arc_set_value(arc, value);
+}
+
+static inline void state_set_if_changed(lv_obj_t *obj, lv_state_t state, bool on) {
+    if (!obj) return;
+    bool cur = (lv_obj_get_state(obj) & state) != 0;
+    if (cur == on) return;
+    if (on) lv_obj_add_state(obj, state);
+    else    lv_obj_clear_state(obj, state);
+}
+
+static inline void style_text_color_if_changed(lv_obj_t *obj, lv_color_t c, lv_style_selector_t sel) {
+    if (!obj) return;
+    lv_color_t cur = lv_obj_get_style_text_color(obj, sel);
+    if (cur.full == c.full) return;
+    lv_obj_set_style_text_color(obj, c, sel);
+}
+
+static inline void style_arc_color_if_changed(lv_obj_t *obj, lv_color_t c, lv_style_selector_t sel) {
+    if (!obj) return;
+    lv_color_t cur = lv_obj_get_style_arc_color(obj, sel);
+    if (cur.full == c.full) return;
+    lv_obj_set_style_arc_color(obj, c, sel);
 }
 #endif
 
@@ -344,9 +378,7 @@ static void apply_device_state(int idx, int32_t value) {
         objects.home_dev5, objects.home_dev6, objects.home_dev7, objects.home_dev8,
     };
     lv_obj_t *btn = btns[idx - 1];
-    if (!btn) return;
-    if (value > 0) lv_obj_add_state(btn, LV_STATE_CHECKED);
-    else           lv_obj_clear_state(btn, LV_STATE_CHECKED);
+    state_set_if_changed(btn, LV_STATE_CHECKED, value > 0);
 #endif
 }
 
@@ -363,13 +395,8 @@ void set_var_device07_status(int32_t v) {
     apply_device_state(7, v);
 #if __has_include("ui/screens.h")
     bool on = (v > 0);
-    if (objects.water_pump_btn) {
-        if (on) lv_obj_add_state(objects.water_pump_btn, LV_STATE_CHECKED);
-        else    lv_obj_clear_state(objects.water_pump_btn, LV_STATE_CHECKED);
-    }
-    if (objects.water_pump_state) {
-        lv_label_set_text(objects.water_pump_state, on ? "ON" : "OFF");
-    }
+    state_set_if_changed(objects.water_pump_btn, LV_STATE_CHECKED, on);
+    label_set_text_if_changed(objects.water_pump_state, on ? "ON" : "OFF");
 #endif
 }
 void set_var_device08_status(int32_t v) { apply_device_state(8, v); }
@@ -393,21 +420,14 @@ void set_var_battery_soc(int32_t percent) {
     metric_push(METRIC_SOC, (int16_t)percent);
 #if __has_include("ui/screens.h")
     char buf[8]; snprintf(buf, sizeof(buf), "%ld", (long)percent);
-    if (objects.power_soc_value) lv_label_set_text(objects.power_soc_value, buf);
-    if (objects.home_pwr_batt_value) lv_label_set_text(objects.home_pwr_batt_value, buf);
-    if (objects.home_pwr_batt_arc) lv_arc_set_value(objects.home_pwr_batt_arc, (int16_t)percent);
+    label_set_text_if_changed(objects.power_soc_value, buf);
+    label_set_text_if_changed(objects.home_pwr_batt_value, buf);
+    arc_set_value_if_changed(objects.home_pwr_batt_arc, (int16_t)percent);
     /* Home battery color = green normally, Danger when SOC < 30 (spec §2a) */
-    lv_color_t c = (percent < 30) ? lv_palette_main(LV_PALETTE_RED)
-                                  : lv_color_hex(0x52A441);
-    /* Use hex-literal for AccentPrimary green so dark theme still shows the
-     * base green here (SOC danger is a status color, theme-invariant). */
-    if (percent < 30) c = lv_color_hex(0xFF5453);
-    if (objects.home_pwr_batt_icon)
-        lv_obj_set_style_text_color(objects.home_pwr_batt_icon, c, LV_PART_MAIN);
-    if (objects.home_pwr_batt_value)
-        lv_obj_set_style_text_color(objects.home_pwr_batt_value, c, LV_PART_MAIN);
-    if (objects.home_pwr_batt_arc)
-        lv_obj_set_style_arc_color(objects.home_pwr_batt_arc, c, LV_PART_INDICATOR);
+    lv_color_t c = (percent < 30) ? lv_color_hex(0xFF5453) : lv_color_hex(0x52A441);
+    style_text_color_if_changed(objects.home_pwr_batt_icon, c, LV_PART_MAIN);
+    style_text_color_if_changed(objects.home_pwr_batt_value, c, LV_PART_MAIN);
+    style_arc_color_if_changed(objects.home_pwr_batt_arc, c, LV_PART_INDICATOR);
 #endif
 }
 
@@ -415,10 +435,8 @@ void set_var_battery_voltage(float volts) {
     s_battery_v = volts;
     metric_push(METRIC_VOLTS, (int16_t)(volts * 100.0f));
 #if __has_include("ui/screens.h")
-    if (objects.power_volts_value) {
-        char buf[8]; snprintf(buf, sizeof(buf), "%.1f", (double)volts);
-        lv_label_set_text(objects.power_volts_value, buf);
-    }
+    char buf[8]; snprintf(buf, sizeof(buf), "%.1f", (double)volts);
+    label_set_text_if_changed(objects.power_volts_value, buf);
 #endif
 }
 
@@ -427,20 +445,16 @@ void set_var_solar_watts(int32_t watts) {
     metric_push(METRIC_SOLAR, (int16_t)watts);
 #if __has_include("ui/screens.h")
     char buf[8]; snprintf(buf, sizeof(buf), "%ld", (long)watts);
-    if (objects.power_solar_value) lv_label_set_text(objects.power_solar_value, buf);
-    if (objects.home_pwr_solar_value) lv_label_set_text(objects.home_pwr_solar_value, buf);
-    if (objects.home_pwr_solar_arc) {
-        int32_t clamped = watts < 0 ? 0 : (watts > 1500 ? 1500 : watts);
-        lv_arc_set_value(objects.home_pwr_solar_arc, (int16_t)clamped);
-    }
+    label_set_text_if_changed(objects.power_solar_value, buf);
+    label_set_text_if_changed(objects.home_pwr_solar_value, buf);
+    int32_t clamped = watts < 0 ? 0 : (watts > 1500 ? 1500 : watts);
+    arc_set_value_if_changed(objects.home_pwr_solar_arc, (int16_t)clamped);
 #endif
 }
 
 void set_var_solar_status(const char *status) {
 #if __has_include("ui/screens.h")
-    if (objects.power_charge_type && status) {
-        lv_label_set_text(objects.power_charge_type, status);
-    }
+    if (status) label_set_text_if_changed(objects.power_charge_type, status);
 #else
     (void)status;
 #endif
@@ -450,13 +464,13 @@ void set_var_consumption_watts(int32_t watts) {
     s_load_w = watts;
     metric_push(METRIC_LOAD, (int16_t)watts);
 #if __has_include("ui/screens.h")
-    if (objects.power_load_value) {
+    {
         char buf[8]; snprintf(buf, sizeof(buf), "%ld", (long)watts);
-        lv_label_set_text(objects.power_load_value, buf);
+        label_set_text_if_changed(objects.power_load_value, buf);
     }
-    if (objects.power_time_load) {
+    {
         char buf[24]; snprintf(buf, sizeof(buf), "at %ld W draw", (long)watts);
-        lv_label_set_text(objects.power_time_load, buf);
+        label_set_text_if_changed(objects.power_time_load, buf);
     }
 #endif
 }
@@ -482,7 +496,7 @@ void set_var_time_remaining(int32_t minutes) {
             if (hh) snprintf(buf, sizeof(buf), "%dd %dh", days, hh);
             else    snprintf(buf, sizeof(buf), "%dd", days);
         }
-        lv_label_set_text(objects.power_time_value, buf);
+        label_set_text_if_changed(objects.power_time_value, buf);
     }
 #else
     (void)minutes;
@@ -512,29 +526,18 @@ static int32_t s_sats = 0;
 static void paint_gnss(void) {
 #if __has_include("ui/screens.h")
     char buf[32];
-    if (objects.trailer_gnss_lat) {
-        /* "39.7392\xc2\xb0 N" — °N/°S from sign; UTF-8 for U+00B0. */
-        snprintf(buf, sizeof(buf), "%.4f\xc2\xb0 %c",
-                 (double)fabsf(s_lat), s_lat >= 0 ? 'N' : 'S');
-        lv_label_set_text(objects.trailer_gnss_lat, buf);
-    }
-    if (objects.trailer_gnss_lon) {
-        snprintf(buf, sizeof(buf), "%.4f\xc2\xb0 %c",
-                 (double)fabsf(s_lon), s_lon >= 0 ? 'E' : 'W');
-        lv_label_set_text(objects.trailer_gnss_lon, buf);
-    }
-    if (objects.trailer_gnss_alt) {
-        snprintf(buf, sizeof(buf), "%.0f ft", (double)s_alt);
-        lv_label_set_text(objects.trailer_gnss_alt, buf);
-    }
-    if (objects.trailer_gnss_sats) {
-        snprintf(buf, sizeof(buf), "%ld", (long)s_sats);
-        lv_label_set_text(objects.trailer_gnss_sats, buf);
-    }
-    if (objects.trailer_gnss_spd) {
-        snprintf(buf, sizeof(buf), "%.1f mph", (double)(s_spd * 1.15078f));
-        lv_label_set_text(objects.trailer_gnss_spd, buf);
-    }
+    snprintf(buf, sizeof(buf), "%.4f\xc2\xb0 %c",
+             (double)fabsf(s_lat), s_lat >= 0 ? 'N' : 'S');
+    label_set_text_if_changed(objects.trailer_gnss_lat, buf);
+    snprintf(buf, sizeof(buf), "%.4f\xc2\xb0 %c",
+             (double)fabsf(s_lon), s_lon >= 0 ? 'E' : 'W');
+    label_set_text_if_changed(objects.trailer_gnss_lon, buf);
+    snprintf(buf, sizeof(buf), "%.0f ft", (double)s_alt);
+    label_set_text_if_changed(objects.trailer_gnss_alt, buf);
+    snprintf(buf, sizeof(buf), "%ld", (long)s_sats);
+    label_set_text_if_changed(objects.trailer_gnss_sats, buf);
+    snprintf(buf, sizeof(buf), "%.1f mph", (double)(s_spd * 1.15078f));
+    label_set_text_if_changed(objects.trailer_gnss_spd, buf);
 #endif
 }
 
@@ -547,8 +550,7 @@ void set_var_satellite_count(int32_t v) { s_sats = v; paint_gnss(); }
 
 void set_var_gnss_mode(const char *mode) {
 #if __has_include("ui/screens.h")
-    if (objects.trailer_gnss_mode && mode)
-        lv_label_set_text(objects.trailer_gnss_mode, mode);
+    if (mode) label_set_text_if_changed(objects.trailer_gnss_mode, mode);
 #else
     (void)mode;
 #endif
@@ -683,23 +685,18 @@ static int32_t s_temp_f = INT32_MIN;
 
 static void paint_air_temp(void) {
 #if __has_include("ui/screens.h")
-    if (objects.air_temp_value) {
-        if (s_temp_f == INT32_MIN) {
-            lv_label_set_text(objects.air_temp_value, "--");
-        } else {
-            /* Bounded value: F ∈ [-40, 150] → C ∈ [-40, 65], both fit in 4 chars.
-             * Explicit int cast tells GCC the max width, silencing -Werror=format-truncation. */
-            char buf[8];
-            int32_t v = f_to_display(s_temp_f);
-            if (v > 999)  v = 999;
-            if (v < -99)  v = -99;
-            snprintf(buf, sizeof(buf), "%d", (int)v);
-            lv_label_set_text(objects.air_temp_value, buf);
-        }
+    if (s_temp_f == INT32_MIN) {
+        label_set_text_if_changed(objects.air_temp_value, "--");
+    } else {
+        /* Bounded value: F ∈ [-40, 150] → C ∈ [-40, 65], both fit in 4 chars. */
+        char buf[8];
+        int32_t v = f_to_display(s_temp_f);
+        if (v > 999)  v = 999;
+        if (v < -99)  v = -99;
+        snprintf(buf, sizeof(buf), "%d", (int)v);
+        label_set_text_if_changed(objects.air_temp_value, buf);
     }
-    if (objects.air_temp_unit) {
-        lv_label_set_text(objects.air_temp_unit, s_temp_unit ? "°C" : "°F");
-    }
+    label_set_text_if_changed(objects.air_temp_unit, s_temp_unit ? "°C" : "°F");
     paint_temp_badge();
 #endif
 }
@@ -715,10 +712,8 @@ void set_var_humidity(float percent) {
     s_hum = percent;
     metric_push(METRIC_HUM, (int16_t)percent);
 #if __has_include("ui/screens.h")
-    if (objects.air_hum_value) {
-        char buf[8]; snprintf(buf, sizeof(buf), "%ld", (long)percent);
-        lv_label_set_text(objects.air_hum_value, buf);
-    }
+    char buf[8]; snprintf(buf, sizeof(buf), "%ld", (long)percent);
+    label_set_text_if_changed(objects.air_hum_value, buf);
     paint_hum_badge();
 #endif
 }
@@ -728,10 +723,8 @@ void set_var_co2(int32_t ppm) {
     s_eco2_ppm = ppm;      /* mirror to the AQ-classifier state */
     metric_push(METRIC_ECO2, (int16_t)ppm);
 #if __has_include("ui/screens.h")
-    if (objects.air_eco2_value) {
-        char buf[8]; snprintf(buf, sizeof(buf), "%ld", (long)ppm);
-        lv_label_set_text(objects.air_eco2_value, buf);
-    }
+    char buf[8]; snprintf(buf, sizeof(buf), "%ld", (long)ppm);
+    label_set_text_if_changed(objects.air_eco2_value, buf);
     paint_air_status();   /* recompute badges + recommendation */
 #endif
 }
@@ -741,10 +734,8 @@ void set_var_tvoc(int32_t ppb) {
     s_tvoc_ppb = ppb;
     metric_push(METRIC_TVOC, (int16_t)ppb);
 #if __has_include("ui/screens.h")
-    if (objects.air_tvoc_value) {
-        char buf[8]; snprintf(buf, sizeof(buf), "%ld", (long)ppb);
-        lv_label_set_text(objects.air_tvoc_value, buf);
-    }
+    char buf[8]; snprintf(buf, sizeof(buf), "%ld", (long)ppb);
+    label_set_text_if_changed(objects.air_tvoc_value, buf);
     paint_air_status();
 #endif
 }
@@ -794,7 +785,7 @@ static aq_cls_t overall_aq_class(void) {
 static void paint_badge(lv_obj_t *badge_panel, lv_obj_t *badge_label,
                         aq_cls_t cls, const char *label_text) {
     if (!badge_panel || !badge_label) return;
-    lv_label_set_text(badge_label, label_text);
+    label_set_text_if_changed(badge_label, label_text);
     lv_color_t bg, txt;
     if (cls == AQ_UNSET) {
         bg = lv_color_hex(0xEDEDED); txt = lv_color_hex(0x888888);
@@ -805,8 +796,10 @@ static void paint_badge(lv_obj_t *badge_panel, lv_obj_t *badge_label,
     } else {
         bg = lv_color_hex(0xFFDDDC); txt = lv_color_hex(0xFF5453);
     }
-    lv_obj_set_style_bg_color(badge_panel, bg, LV_PART_MAIN);
-    lv_obj_set_style_text_color(badge_label, txt, LV_PART_MAIN);
+    lv_color_t cur_bg = lv_obj_get_style_bg_color(badge_panel, LV_PART_MAIN);
+    if (cur_bg.full != bg.full)
+        lv_obj_set_style_bg_color(badge_panel, bg, LV_PART_MAIN);
+    style_text_color_if_changed(badge_label, txt, LV_PART_MAIN);
 }
 
 /* Temp/humidity classifiers use fixed Fahrenheit / %RH thresholds so the
@@ -897,8 +890,7 @@ static void paint_air_status(void) {
                 co_class(),   co_label());
     /* Temp + humidity don't have PWA classifiers, so leave those badges
      * at "--" (neutral grey) via the badge that was authored. */
-    if (objects.air_rec_text)
-        lv_label_set_text(objects.air_rec_text, overall_rec());
+    label_set_text_if_changed(objects.air_rec_text, overall_rec());
     /* Recolor the recommendation card border/label to the overall state
      * so the sidebar acts as a status summary at a glance. */
     aq_cls_t oc = overall_aq_class();
@@ -907,8 +899,7 @@ static void paint_air_status(void) {
     else if (oc == AQ_MOD) accent = lv_color_hex(0xFFC107);
     else if (oc == AQ_GOOD) accent = lv_color_hex(0x52A441);
     else                    accent = lv_color_hex(0x888888);
-    if (objects.air_rec_lbl)
-        lv_obj_set_style_text_color(objects.air_rec_lbl, accent, LV_PART_MAIN);
+    style_text_color_if_changed(objects.air_rec_lbl, accent, LV_PART_MAIN);
     paint_notif_badge();   /* AQ change may toggle the "unhealthy" alarm */
 #endif
 }
@@ -917,10 +908,8 @@ void set_var_co(int32_t ppm) {
     s_co_ppm = ppm;
     metric_push(METRIC_CO, (int16_t)ppm);
 #if __has_include("ui/screens.h")
-    if (objects.air_co_value) {
-        char buf[8]; snprintf(buf, sizeof(buf), "%ld", (long)ppm);
-        lv_label_set_text(objects.air_co_value, buf);
-    }
+    char buf[8]; snprintf(buf, sizeof(buf), "%ld", (long)ppm);
+    label_set_text_if_changed(objects.air_co_value, buf);
     paint_air_status();
 #endif
 }
@@ -950,10 +939,12 @@ void set_var_water_levels(int32_t fresh, int32_t grey, int32_t black) {
         {objects.home_water_black_bar,  objects.home_water_black_pct,  black},
     };
     for (int i = 0; i < 6; i++) {
-        if (rows[i].bar) lv_bar_set_value(rows[i].bar, rows[i].v, LV_ANIM_OFF);
+        if (rows[i].bar && lv_bar_get_value(rows[i].bar) != rows[i].v) {
+            lv_bar_set_value(rows[i].bar, rows[i].v, LV_ANIM_OFF);
+        }
         if (rows[i].pct) {
             char buf[8]; snprintf(buf, sizeof(buf), "%ld%%", (long)rows[i].v);
-            lv_label_set_text(rows[i].pct, buf);
+            label_set_text_if_changed(rows[i].pct, buf);
         }
     }
 #else
@@ -1060,10 +1051,14 @@ static void paint_notif_badge(void) {
     const int n_badges = (int)(sizeof(badges) / sizeof(*badges));
     for (int i = 0; i < n_badges; i++) {
         if (badges[i]) {
-            if (n > 0) lv_obj_clear_flag(badges[i], LV_OBJ_FLAG_HIDDEN);
-            else       lv_obj_add_flag(badges[i], LV_OBJ_FLAG_HIDDEN);
+            bool cur_hidden = lv_obj_has_flag(badges[i], LV_OBJ_FLAG_HIDDEN);
+            bool want_hidden = (n == 0);
+            if (cur_hidden != want_hidden) {
+                if (want_hidden) lv_obj_add_flag(badges[i], LV_OBJ_FLAG_HIDDEN);
+                else             lv_obj_clear_flag(badges[i], LV_OBJ_FLAG_HIDDEN);
+            }
         }
-        if (counts[i]) lv_label_set_text(counts[i], buf);
+        label_set_text_if_changed(counts[i], buf);
     }
 
     /* Keep the currently-open toaster in sync with the live alarm set.

@@ -4,12 +4,21 @@ CONFIG_IDF_TARGET="esp32s3"
 # CPU
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
-# Flash (16MB, QIO 120MHz)
+# Flash (16MB, QIO 120MHz — must match PSRAM speed. Reverting to 80MHz
+# starved the RGB LCD DMA of bandwidth and caused the whole-screen
+# cycling vertical shift to appear IMMEDIATELY rather than after hours
+# of uptime. The 120MHz combined config is IDF-experimental but has
+# been the working configuration for this board.)
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_ESPTOOLPY_FLASHFREQ_120M=y
 
-# PSRAM (8MB OPI, 120MHz — must match flash freq)
+# PSRAM (8MB OPI, 120MHz — matches flash. Tried 80MHz per plan Step 4
+# but immediate DMA underrun made the display shift-cycle instantly
+# instead of after hours. Empirically 120MHz gives the RGB DMA enough
+# bandwidth headroom to keep the panel stable; the slow-onset artifacts
+# the plan attributed to 120MHz PSRAM corruption are almost certainly
+# a different mechanism.)
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_IDF_EXPERIMENTAL_FEATURES=y

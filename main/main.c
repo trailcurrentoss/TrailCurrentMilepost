@@ -52,6 +52,7 @@
 #include "esp_ota_ops.h"
 #include "esp_task_wdt.h"
 #include "esp_system.h"
+#include "esp_heap_caps.h"
 #include "lvgl.h"
 
 #include "ui/ui.h"
@@ -237,11 +238,28 @@ static void set_backlight(uint8_t brightness)
  * [1] Hardware — ST7701 RGB panel (double-buffered, vsync-synced)
  * ========================================================================== */
 static esp_lcd_panel_handle_t panel_handle = NULL;
+
+/* Two semaphores now:
+ *   - vsync_sem: kept for wake ceremony's xQueueReset drain (invalidates any
+ *     stale wait state after a hard recovery). No longer gates the flush.
+ *   - swap_done_sem: given from on_frame_buf_complete, which fires only when
+ *     a newly-submitted framebuffer has actually latched into scan-out.
+ *     There are no stale tokens by construction, so waiting on it is real.
+ *
+ * Prior to Fix 1 the flush gated on vsync_sem, which the on_vsync ISR gave
+ * unconditionally every vsync (~30 ms). A stale token was almost always
+ * pending when lvgl_flush_cb ran, so the "wait for swap to latch" returned
+ * instantly and LVGL began rendering into the framebuffer the RGB peripheral
+ * was still scanning out — the classic tearing on large dirty regions. */
 static SemaphoreHandle_t vsync_sem = NULL;
+static SemaphoreHandle_t swap_done_sem = NULL;
 
 /* Free-running vsync tally + flush-timeout counters. Used by wakediag +
  * hard-recovery threshold. */
 static volatile uint32_t s_vsync_count = 0;
+static volatile uint32_t s_fb_complete_count = 0;
+static volatile uint32_t s_flush_count = 0;
+static volatile uint32_t s_flush_take_timeout_us_max = 0;
 static volatile uint32_t s_flush_timeout_count = 0;
 #define HARD_RECOVERY_THRESHOLD 30
 static volatile uint32_t s_consecutive_flush_timeouts = 0;
@@ -261,6 +279,20 @@ static IRAM_ATTR bool on_vsync(esp_lcd_panel_handle_t panel,
     return woken == pdTRUE;
 }
 
+/* Fires when a framebuffer previously submitted via esp_lcd_panel_draw_bitmap
+ * has finished loading into scan-out. Gating flush on this eliminates the
+ * stale-token race described above. */
+static IRAM_ATTR bool on_fb_complete(esp_lcd_panel_handle_t panel,
+                                     const esp_lcd_rgb_panel_event_data_t *edata,
+                                     void *user_ctx)
+{
+    (void)panel; (void)edata; (void)user_ctx;
+    s_fb_complete_count++;
+    BaseType_t woken = pdFALSE;
+    xSemaphoreGiveFromISR(swap_done_sem, &woken);
+    return woken == pdTRUE;
+}
+
 static void lcd_reset(void)
 {
     io_ext_set_bit(IO_EXT_IO3_BIT, false);
@@ -273,6 +305,7 @@ static void lcd_init(void)
 {
     lcd_reset();
     vsync_sem = xSemaphoreCreateBinary();
+    swap_done_sem = xSemaphoreCreateBinary();
 
     esp_lcd_rgb_panel_config_t panel_config = {
         .clk_src = LCD_CLK_SRC_DEFAULT,
@@ -311,7 +344,10 @@ static void lcd_init(void)
     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
     ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle));
 
-    esp_lcd_rgb_panel_event_callbacks_t cbs = { .on_vsync = on_vsync };
+    esp_lcd_rgb_panel_event_callbacks_t cbs = {
+        .on_vsync = on_vsync,
+        .on_frame_buf_complete = on_fb_complete,
+    };
     ESP_ERROR_CHECK(esp_lcd_rgb_panel_register_event_callbacks(panel_handle, &cbs, NULL));
 
     ESP_LOGI(TAG, "RGB LCD initialized (double-buffered, vsync-synced)");
@@ -413,10 +449,32 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
 {
     (void)area;
     if (lv_disp_flush_is_last(drv)) {
-        /* Bounded vsync wait — was portMAX_DELAY, which silently hung the
-         * main task whenever the RGB panel wedged. On streak overflow the
-         * main loop performs a hard panel recovery. */
-        if (xSemaphoreTake(vsync_sem, pdMS_TO_TICKS(100)) != pdTRUE) {
+        /* Fix 1: submit the new framebuffer, drain any tokens fired before
+         * this moment (they correspond to the OLD cur_fb_index), then wait
+         * for the NEXT token — which is guaranteed to come from a bounce
+         * wrap that saw cur_fb_index=new, i.e. bb_fb_index has caught up
+         * to the newly-submitted fb.
+         *
+         * Ordering is DRAW → DRAIN → TAKE. This is load-bearing: draining
+         * first (before draw_bitmap) leaves a race — a wrap can fire
+         * BETWEEN drain and draw with cur_fb_index still pointing at OLD,
+         * giving us a false-positive token that lets LVGL start writing
+         * into the buffer the LCD is still scanning out. That reproduces
+         * exactly the tearing the fix is meant to eliminate. This matches
+         * the reference implementation at DOCS/…/12_lvgl_transplant/…/
+         * lvgl_port.c:210-214.
+         *
+         * The 100 ms bound + consecutive-timeout hard recovery catches the
+         * separate panel-wedge failure mode (RGB peripheral stops emitting
+         * anything). */
+        esp_lcd_panel_draw_bitmap(panel_handle, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, color_map);
+        xSemaphoreTake(swap_done_sem, 0);
+        s_flush_count++;
+        int64_t take_start_us = esp_timer_get_time();
+        BaseType_t got = xSemaphoreTake(swap_done_sem, pdMS_TO_TICKS(100));
+        uint32_t took_us = (uint32_t)(esp_timer_get_time() - take_start_us);
+        if (took_us > s_flush_take_timeout_us_max) s_flush_take_timeout_us_max = took_us;
+        if (got != pdTRUE) {
             s_flush_timeout_count++;
             uint32_t consec = ++s_consecutive_flush_timeouts;
             if (consec >= HARD_RECOVERY_THRESHOLD && !s_panel_hard_recovery_pending) {
@@ -430,7 +488,7 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
             if (now - s_last_log_us > 1000000) {
                 s_last_log_us = now;
                 ESP_LOGE(TAG,
-                    "[wakediag] lvgl_flush_cb vsync WAIT TIMEOUT (>100ms) count=%lu consec=%lu vsync=%lu",
+                    "[wakediag] lvgl_flush_cb swap WAIT TIMEOUT (>100ms) count=%lu consec=%lu vsync=%lu",
                     (unsigned long)s_flush_timeout_count,
                     (unsigned long)consec,
                     (unsigned long)s_vsync_count);
@@ -438,7 +496,6 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
         } else {
             s_consecutive_flush_timeouts = 0;
         }
-        esp_lcd_panel_draw_bitmap(panel_handle, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, color_map);
     }
     lv_disp_flush_ready(drv);
 }
@@ -894,31 +951,64 @@ static void wake_touch_cb(lv_event_t *e)
              desired_brightness);
 }
 
+/* Main-loop counter — incremented once per outer while(1) iteration below. */
+static volatile uint32_t s_main_loop_count = 0;
+
 static void wakediag_periodic(void)
 {
-    if (!screen_timed_out) return;
     static int64_t s_last_log_us = 0;
     int64_t now = esp_timer_get_time();
     if (now - s_last_log_us < 5000000) return;
     s_last_log_us = now;
 
-    uint32_t inactive_ms = lv_disp_get_inactive_time(NULL);
-    bool ch32_ok = (i2c_master_probe(i2c_bus, IO_EXT_ADDR, pdMS_TO_TICKS(50)) == ESP_OK);
-    bool gt911_ok = (i2c_master_probe(i2c_bus, 0x5D, pdMS_TO_TICKS(50)) == ESP_OK) ||
-                    (i2c_master_probe(i2c_bus, 0x14, pdMS_TO_TICKS(50)) == ESP_OK);
-    int int_pin = gpio_get_level(4);
     static uint32_t s_last_vsync_count = 0;
+    static uint32_t s_last_loop_count  = 0;
     uint32_t vsync_now = s_vsync_count;
     uint32_t vsync_delta = vsync_now - s_last_vsync_count;
     s_last_vsync_count = vsync_now;
-    ESP_LOGI(TAG, "[wakediag] sleep_tick inactive_ms=%lu CH32V003=%s GT911=%s INT=%d io_ext_out=0x%02X vsync=%lu (+%lu/5s) flush_timeouts=%lu",
-             (unsigned long)inactive_ms,
-             ch32_ok ? "OK" : "NACK",
-             gt911_ok ? "OK" : "NACK",
-             int_pin, io_ext_out,
-             (unsigned long)vsync_now,
-             (unsigned long)vsync_delta,
-             (unsigned long)s_flush_timeout_count);
+    uint32_t loop_now = s_main_loop_count;
+    uint32_t loop_delta = loop_now - s_last_loop_count;
+    s_last_loop_count = loop_now;
+    /* /5s → per-second; vsync is ~35 Hz, loop is ~200 Hz baseline. */
+    uint32_t vsync_hz = vsync_delta / 5;
+    uint32_t loop_hz  = loop_delta / 5;
+
+    if (screen_timed_out) {
+        uint32_t inactive_ms = lv_disp_get_inactive_time(NULL);
+        bool ch32_ok = (i2c_master_probe(i2c_bus, IO_EXT_ADDR, pdMS_TO_TICKS(50)) == ESP_OK);
+        bool gt911_ok = (i2c_master_probe(i2c_bus, 0x5D, pdMS_TO_TICKS(50)) == ESP_OK) ||
+                        (i2c_master_probe(i2c_bus, 0x14, pdMS_TO_TICKS(50)) == ESP_OK);
+        int int_pin = gpio_get_level(4);
+        ESP_LOGI(TAG, "[wakediag] sleep_tick inactive_ms=%lu CH32V003=%s GT911=%s INT=%d io_ext_out=0x%02X vsync=%lu (+%lu/5s=%luHz) loop=%luHz flush_timeouts=%lu",
+                 (unsigned long)inactive_ms,
+                 ch32_ok ? "OK" : "NACK",
+                 gt911_ok ? "OK" : "NACK",
+                 int_pin, io_ext_out,
+                 (unsigned long)vsync_now,
+                 (unsigned long)vsync_delta,
+                 (unsigned long)vsync_hz,
+                 (unsigned long)loop_hz,
+                 (unsigned long)s_flush_timeout_count);
+    } else {
+        static uint32_t s_last_fb_count = 0, s_last_flush_count = 0;
+        uint32_t fb_now = s_fb_complete_count;
+        uint32_t fb_delta = fb_now - s_last_fb_count;
+        s_last_fb_count = fb_now;
+        uint32_t flush_now = s_flush_count;
+        uint32_t flush_delta = flush_now - s_last_flush_count;
+        s_last_flush_count = flush_now;
+        uint32_t max_us = s_flush_take_timeout_us_max;
+        s_flush_take_timeout_us_max = 0;
+        ESP_LOGI(TAG, "[wakediag] awake_tick vsync=%luHz fb_complete=%luHz flush=%luHz max_wait=%luus loop=%luHz timeouts=%lu psram=%u/%u",
+                 (unsigned long)vsync_hz,
+                 (unsigned long)(fb_delta / 5),
+                 (unsigned long)(flush_delta / 5),
+                 (unsigned long)max_us,
+                 (unsigned long)loop_hz,
+                 (unsigned long)s_flush_timeout_count,
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+    }
 }
 
 static void handle_screen_timeout(void)
@@ -973,6 +1063,7 @@ static void perform_wake_recovery(void)
              (unsigned long)s_consecutive_flush_timeouts);
 
     xQueueReset(vsync_sem);
+    xQueueReset(swap_done_sem);
 
     if (dim_us >= WAKE_TOUCH_RESET_DIM_US) {
         ESP_LOGI(TAG, "[wakediag] wake ceremony: resetting GT911 (dim >= %lld min)",
@@ -989,6 +1080,7 @@ static void perform_panel_hard_recovery(void)
              (unsigned long)s_flush_timeout_count);
     lcd_reset();
     xQueueReset(vsync_sem);
+    xQueueReset(swap_done_sem);
     lv_obj_invalidate(lv_scr_act());
     s_consecutive_flush_timeouts = 0;
 }
@@ -1007,6 +1099,28 @@ static void perform_panel_hard_recovery(void)
  * ========================================================================== */
 static bool s_system_time_set = false;
 
+/* Pure UTC epoch calculation — Howard Hinnant "days_from_civil" algorithm.
+ * Replaces the setenv("TZ","UTC0")+tzset()+mktime()+setenv(restore)+tzset()
+ * dance. That dance leaked ~26 B of PSRAM per setenv overwrite on newlib;
+ * with Bearing broadcasting CAN 0x06 at 1 Hz that was ~52 B/s, exhausting
+ * the 4 MB PSRAM budget in ~22 h and wedging LVGL's next arc-mask
+ * allocation. Symptom: tearing + dead touch + stale data after long uptime,
+ * only clears on power cycle. See long-sleep-wake-bug memory for the full
+ * root-cause writeup. This function is pure arithmetic — no allocation,
+ * no libc TZ machinery. */
+static int64_t utc_epoch_from_ymdhms(uint16_t y, uint8_t m, uint8_t d,
+                                     uint8_t H, uint8_t M, uint8_t S)
+{
+    int32_t ye = (m <= 2) ? (int32_t)y - 1 : (int32_t)y;
+    int32_t era = (ye >= 0 ? ye : ye - 399) / 400;
+    uint32_t yoe = (uint32_t)(ye - era * 400);
+    uint32_t doy = (153U * (m > 2 ? (uint32_t)m - 3U : (uint32_t)m + 9U) + 2U) / 5U
+                   + (uint32_t)d - 1U;
+    uint32_t doe = yoe * 365U + yoe / 4U - yoe / 100U + doy;
+    int64_t days = (int64_t)era * 146097 + (int64_t)doe - 719468;
+    return days * 86400LL + (int64_t)H * 3600 + (int64_t)M * 60 + (int64_t)S;
+}
+
 static void set_system_time_from_bearing(void)
 {
     /* Reject pre-fix garbage from GNSS. */
@@ -1017,42 +1131,22 @@ static void set_system_time_from_bearing(void)
     if (g_clock_minute > 59) return;
     if (g_clock_second > 60) return;
 
-    /* Convert UTC fields → epoch via mktime with TZ temporarily UTC. */
-    char *saved_tz = getenv("TZ");
-    char saved_tz_buf[64] = {0};
-    if (saved_tz) strlcpy(saved_tz_buf, saved_tz, sizeof(saved_tz_buf));
-    setenv("TZ", "UTC0", 1);
-    tzset();
-
-    struct tm tm_utc = {
-        .tm_year = g_clock_year - 1900,
-        .tm_mon  = g_clock_month - 1,
-        .tm_mday = g_clock_day,
-        .tm_hour = g_clock_hour,
-        .tm_min  = g_clock_minute,
-        .tm_sec  = g_clock_second,
-    };
-    time_t gnss_epoch = mktime(&tm_utc);
-    if (gnss_epoch <= 0) {
-        if (saved_tz_buf[0]) { setenv("TZ", saved_tz_buf, 1); tzset(); }
-        return;
-    }
+    int64_t gnss_epoch = utc_epoch_from_ymdhms(
+        g_clock_year, g_clock_month, g_clock_day,
+        g_clock_hour, g_clock_minute, g_clock_second);
+    if (gnss_epoch <= 0) return;
 
     if (s_system_time_set) {
         time_t now; time(&now);
-        time_t diff = gnss_epoch > now ? gnss_epoch - now : now - gnss_epoch;
-        if (diff <= 2) {
-            if (saved_tz_buf[0]) { setenv("TZ", saved_tz_buf, 1); tzset(); }
-            return;
-        }
+        int64_t diff = gnss_epoch > (int64_t)now
+                       ? gnss_epoch - (int64_t)now
+                       : (int64_t)now - gnss_epoch;
+        if (diff <= 2) return;
     }
 
-    struct timeval tv = { .tv_sec = gnss_epoch, .tv_usec = 0 };
+    struct timeval tv = { .tv_sec = (time_t)gnss_epoch, .tv_usec = 0 };
     settimeofday(&tv, NULL);
     s_system_time_set = true;
-
-    /* Restore whatever timezone vars.c set for us. */
-    if (saved_tz_buf[0]) { setenv("TZ", saved_tz_buf, 1); tzset(); }
 }
 
 static const char *gnss_mode_string(uint8_t mode)
@@ -1344,6 +1438,7 @@ void app_main(void)
 
     while (1) {
         esp_task_wdt_reset();
+        s_main_loop_count++;
 
         /* Recovery actions BEFORE lv_timer_handler so the full-screen
          * invalidate they schedule is picked up in this iteration. Hard
