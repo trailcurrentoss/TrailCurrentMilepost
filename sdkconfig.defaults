@@ -23,15 +23,27 @@ CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_IDF_EXPERIMENTAL_FEATURES=y
 CONFIG_SPIRAM_SPEED_120M=y
+CONFIG_SPIRAM_SPEED=120
+# NOTE: attempted CONFIG_SPIRAM_FETCH_INSTRUCTIONS=n +
+# CONFIG_SPIRAM_RODATA=n as a tearing experiment (2026-07-26) to move
+# code+rodata off PSRAM and reduce MSPI contention with the LCD DMA.
+# Result: boot-loop with "Cache error" panic on core 0 every reset.
+# Combined 120M flash + 120M OPI PSRAM + LVGL 8.4 cache attributes
+# apparently require code to live in PSRAM on this chip config.
 CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
 CONFIG_SPIRAM_RODATA=y
+# NOTE: attempted SPIRAM_TIMING_TUNING_POINT_VIA_TEMPERATURE_SENSOR=y
+# to solve slow-onset tearing at 120M PSRAM but this flash chip is not
+# in Espressif's verified-support list and cpu_start aborted at boot
+# with: "MSPI Timing: The flash model has not been verified support
+# this feature, please contact espressif business support". Feature
+# cannot be enabled on this hardware.
+# From vendor demo: allocate WiFi/lwIP buffers in PSRAM. Frees internal
+# RAM for LVGL work/IRAM-safe ISRs; costs some PSRAM bandwidth but the
+# tradeoff is what the vendor's known-good config uses.
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
-# 120MHz OPI PSRAM has a narrow data-valid window that shifts with die
-# temperature. ECC detects+corrects single-bit read errors that would
-# otherwise land in the RGB bounce buffer as corrupted pixels — the
-# hardware-side equivalent of the "started tearing after hours" onset
-# the vendor baseline saw once the die warmed up.
-CONFIG_SPIRAM_ECC_ENABLE=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_SIZE=64
 
 # Compiler optimization
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
@@ -53,14 +65,12 @@ CONFIG_TWAI_ERRATA_FIX_RX_FIFO_CORRUPT=y
 CONFIG_TWAI_ISR_IN_IRAM=y
 
 # Latency hardening for the RGB LCD + GDMA path.
-# The RGB panel + GDMA bounce-buffer refill ISRs run on the core that
-# installs them (core 0 here). Under heavy CAN traffic that same core
-# is servicing the TWAI ISR too. IRAM-safe ISRs keep firing even when
-# the flash cache is disabled (e.g. NVS writes); RESTART_IN_VSYNC lets
-# the panel self-heal after an underrun instead of latching a black
-# frame / shifted image until the next power cycle.
+# IRAM-safe ISRs keep firing when the flash cache is disabled (e.g. NVS
+# writes). RESTART_IN_VSYNC is DISABLED to match the vendor baseline —
+# the per-vsync DMA restart is a phase-setting event implicated in the
+# scan-position slips we've been chasing.
 CONFIG_LCD_RGB_ISR_IRAM_SAFE=y
-CONFIG_LCD_RGB_RESTART_IN_VSYNC=y
+CONFIG_LCD_RGB_RESTART_IN_VSYNC=n
 CONFIG_GDMA_ISR_IRAM_SAFE=y
 
 # OTA rollback protection

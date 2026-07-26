@@ -85,6 +85,12 @@ static inline void arc_set_value_if_changed(lv_obj_t *arc, int16_t value) {
     lv_arc_set_value(arc, value);
 }
 
+static inline void bar_set_value_if_changed(lv_obj_t *b, int32_t value) {
+    if (!b) return;
+    if (lv_bar_get_value(b) == value) return;
+    lv_bar_set_value(b, value, LV_ANIM_OFF);
+}
+
 static inline void state_set_if_changed(lv_obj_t *obj, lv_state_t state, bool on) {
     if (!obj) return;
     bool cur = (lv_obj_get_state(obj) & state) != 0;
@@ -216,119 +222,16 @@ int16_t metric_last(metric_id_t id) {
  * visible.
  * ============================================================ */
 
-#if __has_include("ui/screens.h")
-
-typedef struct {
-    metric_id_t   id;
-    lv_obj_t    **parent_ref;      /* &objects.<page>_<metric>_chart */
-    uint32_t      color_rgb888;    /* baked so we don't lookup palette */
-    int32_t       y_min, y_max;    /* per-metric fixed Y range */
-    lv_obj_t     *chart_obj;
-    lv_chart_series_t *series;
-} metric_chart_binding_t;
-
-static metric_chart_binding_t s_metric_charts[] = {
-    /* Air metrics — colors match spec §9. Y-ranges tightened to the
-     * typical observed band so bars are visibly proportional; edge
-     * values overflow at the top which is fine for a history view. */
-    { METRIC_TEMP,  &objects.air_temp_chart,   0xFF5453,    40,  100, NULL, NULL },
-    { METRIC_HUM,   &objects.air_hum_chart,    0x48E6FE,    20,   80, NULL, NULL },
-    /* SGP41 clean-air baseline is 400 ppm; with y_min=400 every bar at
-     * baseline renders at zero height and the chart looks empty even
-     * though samples are landing. Pull y_min to 0 so the baseline shows
-     * as a visible bar (~27% of chart height) and rises/falls read as
-     * proportional deltas. */
-    { METRIC_ECO2,  &objects.air_eco2_chart,   0x52A441,     0, 1500, NULL, NULL },
-    { METRIC_TVOC,  &objects.air_tvoc_chart,   0xFFC107,     0,  500, NULL, NULL },
-    { METRIC_CO,    &objects.air_co_chart,     0x505050,     0,   20, NULL, NULL },
-    /* Power metrics. VOLTS is stored ×100 in the ring (int16 packing). */
-    { METRIC_SOLAR, &objects.power_solar_chart, 0xFFC107,    0,  800, NULL, NULL },
-    { METRIC_SOC,   &objects.power_soc_chart,   0x52A441,    0,  100, NULL, NULL },
-    { METRIC_VOLTS, &objects.power_volts_chart, 0x505050, 1200, 1450, NULL, NULL },
-    { METRIC_LOAD,  &objects.power_load_chart,  0x48E6FE,    0,  500, NULL, NULL },
-};
-
-static void chart_push_sample(metric_id_t id, int16_t value) {
-    for (size_t i = 0; i < sizeof(s_metric_charts)/sizeof(*s_metric_charts); i++) {
-        metric_chart_binding_t *b = &s_metric_charts[i];
-        if (b->id != id || !b->chart_obj || !b->series) continue;
-        lv_coord_t v = (value == METRIC_MISSING) ? LV_CHART_POINT_NONE
-                                                 : (lv_coord_t)value;
-        lv_chart_set_next_value(b->chart_obj, b->series, v);
-        /* lv_chart_set_next_value already invalidates the chart
-         * internally on LVGL 8.4 — no need for an explicit refresh
-         * / invalidate here. Since we now only call this once per
-         * 2.5-min bucket rollover, the redraw fires within a frame
-         * of the push without a helper kick. */
-    }
-}
-
-void init_metric_charts(void) {
-    int16_t history[METRIC_HISTORY_LEN];
-    for (size_t i = 0; i < sizeof(s_metric_charts)/sizeof(*s_metric_charts); i++) {
-        metric_chart_binding_t *b = &s_metric_charts[i];
-        lv_obj_t *parent = *(b->parent_ref);
-        if (!parent) continue;
-
-        /* Runtime-created chart — geometry APIs on this object are fine
-         * because it's not an EEZ Studio-authored `objects.<w>` symbol.
-         * Trap 5 (canvas divergence) applies only to authored widgets. */
-        lv_obj_t *chart = lv_chart_create(parent);
-        lv_obj_set_pos(chart, 0, 0);
-        lv_obj_set_size(chart, lv_pct(100), lv_pct(100));
-        lv_chart_set_type(chart, LV_CHART_TYPE_BAR);
-        lv_chart_set_point_count(chart, METRIC_HISTORY_LEN);
-        lv_chart_set_update_mode(chart, LV_CHART_UPDATE_MODE_SHIFT);
-        lv_chart_set_div_line_count(chart, 0, 0);
-        lv_chart_set_range(chart, LV_CHART_AXIS_PRIMARY_Y,
-                           b->y_min, b->y_max);
-
-        /* Flat visual: no chart background, no border, no ticks. */
-        lv_obj_set_style_bg_opa(chart, LV_OPA_TRANSP, LV_PART_MAIN);
-        lv_obj_set_style_border_width(chart, 0, LV_PART_MAIN);
-        lv_obj_set_style_pad_all(chart, 0, LV_PART_MAIN);
-        lv_obj_set_style_shadow_width(chart, 0, LV_PART_MAIN);
-        /* 1 px inter-bar gap so the 60 packed bars stay visually
-         * distinct at ~5–6 px slot width. */
-        lv_obj_set_style_pad_column(chart, 1, LV_PART_MAIN);
-
-        lv_color_t bar_color = lv_color_hex(b->color_rgb888);
-        lv_chart_series_t *ser = lv_chart_add_series(chart, bar_color,
-                                                    LV_CHART_AXIS_PRIMARY_Y);
-
-        /* Bar fill: solid metric color at 85 % opa (spec §9 — 0.85·255
-         * = 217), no border, square corners. */
-        lv_obj_set_style_bg_color(chart, bar_color, LV_PART_ITEMS);
-        lv_obj_set_style_bg_opa(chart, 217, LV_PART_ITEMS);
-        lv_obj_set_style_border_width(chart, 0, LV_PART_ITEMS);
-        lv_obj_set_style_radius(chart, 0, LV_PART_ITEMS);
-
-        b->chart_obj = chart;
-        b->series    = ser;
-
-        /* Start empty — every bar slot is LV_CHART_POINT_NONE so the
-         * bar chart draws no bars. The first bar appears 2.5 min after
-         * the first sample arrives (see metric_push()), and thereafter
-         * one new bar appears per 2.5 min bucket.
-         *
-         * Note: at boot init_metric_charts() runs BEFORE any CAN frame arrives
-         * so the ring is empty anyway; the explicit NONE-fill also
-         * clears any stray defaults LVGL set on `lv_chart_add_series`. */
-        (void)history;
-        for (int k = 0; k < METRIC_HISTORY_LEN; k++) {
-            lv_chart_set_next_value(chart, ser, LV_CHART_POINT_NONE);
-        }
-    }
-}
-
-#else  /* ui/screens.h not yet exported — stub the forward decl */
-
+/* Chart binding table removed 2026-07-26 — PagePower and PageAir were
+ * redesigned to show current values only (no historical bar charts).
+ * The metric_push() ring buffer above is retained in case a future
+ * feature (MQTT publish, on-disk logging) needs the recent samples.
+ * chart_push_sample and init_metric_charts are stubbed so any residual
+ * callers remain safe. */
 static void chart_push_sample(metric_id_t id, int16_t value) {
     (void)id; (void)value;
 }
 void init_metric_charts(void) {}
-
-#endif
 
 /* ============================================================
  * Temperature unit + conversion
@@ -464,14 +367,29 @@ void set_var_consumption_watts(int32_t watts) {
     s_load_w = watts;
     metric_push(METRIC_LOAD, (int16_t)watts);
 #if __has_include("ui/screens.h")
+    /* Shunt sign convention (per user 2026-07-26):
+     *   watts < 0 = current drawing from the battery
+     *   watts > 0 = net inflow (solar/shore exceeds usage, battery is
+     *               charging) — in that case there is NOTHING being pulled
+     *               out of the battery, so the "consumption" panel reads 0.
+     * The right-hand Power card shows NET DRAW from the battery — the
+     * user shouldn't have to subtract solar from load themselves. */
+    int32_t draw = (watts < 0) ? -watts : 0;
+    if (draw > 99999) draw = 99999;   /* cap so display buffer never truncates */
     {
-        char buf[8]; snprintf(buf, sizeof(buf), "%ld", (long)watts);
+        char buf[8]; snprintf(buf, sizeof(buf), "%ld", (long)draw);
         label_set_text_if_changed(objects.power_load_value, buf);
     }
     {
-        char buf[24]; snprintf(buf, sizeof(buf), "at %ld W draw", (long)watts);
+        char buf[24]; snprintf(buf, sizeof(buf), "at %ld W draw", (long)draw);
         label_set_text_if_changed(objects.power_time_load, buf);
     }
+    /* Arc: 0..1500 W of DRAW → 0..100 % of the ring (1500 W = typical RV
+     * inverter continuous max). Charging shows as empty ring. */
+    int32_t pct;
+    if (draw >= 1500) pct = 100;
+    else              pct = (draw * 100) / 1500;
+    arc_set_value_if_changed(objects.power_load_arc, (int16_t)pct);
 #endif
 }
 
@@ -667,10 +585,13 @@ static float   s_hum  = -1.0f;
 static int32_t s_eco2 = 0;
 static int32_t s_tvoc = 0;
 
-/* AQ classifier state — mirrors PWA's dataSafety/data sources. -1 = unset
- * so we can distinguish "never received" from a real 0 reading. Populated
- * by set_var_co2/tvoc/co/co_flags; consumed by paint_air_status(). */
-static int32_t s_co_ppm   = -1;
+/* AQ classifier state — mirrors PWA's dataSafety/data sources.
+ * CO defaults to 0 so a system that isn't feeding CO CAN frames shows
+ * "Normal" rather than an empty badge (per user request 2026-07-26).
+ * TVOC/eCO2 keep -1=unset because they DO get CAN-fed and we want
+ * to distinguish "not received" from "actually zero".
+ */
+static int32_t s_co_ppm   = 0;
 static bool    s_co_warn  = false;
 static bool    s_co_alarm = false;
 static int32_t s_eco2_ppm = -1;
@@ -698,6 +619,14 @@ static void paint_air_temp(void) {
     }
     label_set_text_if_changed(objects.air_temp_unit, s_temp_unit ? "°C" : "°F");
     paint_temp_badge();
+    /* Bar range in JSON is 40..100 °F. Clamp raw value to that range so
+     * the indicator fills proportionally without over/underflow. */
+    if (s_temp_f != INT32_MIN) {
+        int32_t bv = s_temp_f;
+        if (bv < 40)  bv = 40;
+        if (bv > 100) bv = 100;
+        bar_set_value_if_changed(objects.air_temp_bar, bv);
+    }
 #endif
 }
 
@@ -715,6 +644,11 @@ void set_var_humidity(float percent) {
     char buf[8]; snprintf(buf, sizeof(buf), "%ld", (long)percent);
     label_set_text_if_changed(objects.air_hum_value, buf);
     paint_hum_badge();
+    /* Bar range 0..100 % — direct mapping, clamp for safety. */
+    int32_t bv = (int32_t)percent;
+    if (bv < 0)   bv = 0;
+    if (bv > 100) bv = 100;
+    bar_set_value_if_changed(objects.air_hum_bar, bv);
 #endif
 }
 
@@ -725,6 +659,9 @@ void set_var_co2(int32_t ppm) {
 #if __has_include("ui/screens.h")
     char buf[8]; snprintf(buf, sizeof(buf), "%ld", (long)ppm);
     label_set_text_if_changed(objects.air_eco2_value, buf);
+    /* Bar range 0..2000 ppm. */
+    int32_t bv = ppm; if (bv < 0) bv = 0; if (bv > 2000) bv = 2000;
+    bar_set_value_if_changed(objects.air_eco2_bar, bv);
     paint_air_status();   /* recompute badges + recommendation */
 #endif
 }
@@ -736,6 +673,9 @@ void set_var_tvoc(int32_t ppb) {
 #if __has_include("ui/screens.h")
     char buf[8]; snprintf(buf, sizeof(buf), "%ld", (long)ppb);
     label_set_text_if_changed(objects.air_tvoc_value, buf);
+    /* Bar range 0..1000 ppb. */
+    int32_t bv = ppb; if (bv < 0) bv = 0; if (bv > 1000) bv = 1000;
+    bar_set_value_if_changed(objects.air_tvoc_bar, bv);
     paint_air_status();
 #endif
 }
@@ -857,7 +797,6 @@ static const char *co_label(void) {
     if (s_co_warn  || s_co_ppm >= 70)  return "WARNING";
     return "NORMAL";
 }
-__attribute__((unused))
 static const char *overall_label(void) {
     switch (overall_aq_class()) {
     case AQ_GOOD: return "GOOD";
@@ -891,8 +830,9 @@ static void paint_air_status(void) {
     /* Temp + humidity don't have PWA classifiers, so leave those badges
      * at "--" (neutral grey) via the badge that was authored. */
     label_set_text_if_changed(objects.air_rec_text, overall_rec());
-    /* Recolor the recommendation card border/label to the overall state
-     * so the sidebar acts as a status summary at a glance. */
+    /* Overall pill (top-right of PageAir header) gets the summary label
+     * ("Good" / "Moderate" / "Unhealthy") plus a matching accent color. */
+    label_set_text_if_changed(objects.air_rec_lbl, overall_label());
     aq_cls_t oc = overall_aq_class();
     lv_color_t accent;
     if      (oc == AQ_BAD) accent = lv_color_hex(0xFF5453);
@@ -910,6 +850,9 @@ void set_var_co(int32_t ppm) {
 #if __has_include("ui/screens.h")
     char buf[8]; snprintf(buf, sizeof(buf), "%ld", (long)ppm);
     label_set_text_if_changed(objects.air_co_value, buf);
+    /* Bar range 0..200 ppm. */
+    int32_t bv = ppm; if (bv < 0) bv = 0; if (bv > 200) bv = 200;
+    bar_set_value_if_changed(objects.air_co_bar, bv);
     paint_air_status();
 #endif
 }
@@ -1073,8 +1016,13 @@ static void paint_notif_badge(void) {
 /* label_wifi_connection_status is already painted from app_state.c's
  * static set_wifi_status_text() on every WIFI_EVENT_STA_* transition. */
 
+extern bool screen_timed_out;   /* defined in main.c */
+
 void set_var_wifi_rssi(int32_t rssi_dbm) {
 #if __has_include("ui/screens.h")
+    /* Zero widget writes while dim — user requirement. On wake, the poll
+     * fires again within its 5-second interval and repopulates. */
+    if (screen_timed_out) return;
     /* Cached-last-value guard: the poller re-applies the same rssi every
      * 5 s while the link is quiet, and LVGL 8's lv_label_set_text always
      * invalidates. Bail out when unchanged so an idle station doesn't

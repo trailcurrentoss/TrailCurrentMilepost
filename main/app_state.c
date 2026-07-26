@@ -41,8 +41,11 @@ static void load(lv_obj_t *scr) {
     }
 }
 
+extern bool screen_timed_out;   /* defined in main.c */
+
 static void set_wifi_status_text(const char *text) {
 #if __has_include("ui/screens.h")
+    if (screen_timed_out) return;   /* zero widget writes while dim */
     if (!lvgl_port_lock(0)) return;
     if (objects.label_wifi_connection_status)
         lv_label_set_text(objects.label_wifi_connection_status, text);
@@ -186,6 +189,7 @@ static void wifi_build_row(lv_obj_t *container, size_t idx,
  * Called from the wifi_setup state callback when scanning finishes. */
 void app_state_paint_wifi_rows(void) {
 #if __has_include("ui/screens.h")
+    if (screen_timed_out) return;   /* zero widget writes while dim */
     wifi_setup_network_t nets[WIFI_SETUP_MAX_SCAN_RESULTS];
     size_t n = wifi_setup_get_scan_results(nets, WIFI_SETUP_MAX_SCAN_RESULTS);
 
@@ -270,6 +274,7 @@ void app_state_wifi_show_password(const char *ssid) {
 
 void app_state_paint_wifi_scanning(void) {
 #if __has_include("ui/screens.h")
+    if (screen_timed_out) return;
     if (!lvgl_port_lock(0)) return;
     if (objects.wifi_row_container) {
         lv_obj_clean(objects.wifi_row_container);

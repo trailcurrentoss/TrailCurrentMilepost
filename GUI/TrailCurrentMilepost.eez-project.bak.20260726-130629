@@ -9753,7 +9753,7 @@
                     "definition": {
                       "MAIN": {
                         "DEFAULT": {
-                          "bg_color": "BgCardHover",
+                          "bg_color": "BgBar",
                           "bg_opa": 255,
                           "border_width": 0,
                           "border_opa": 0,
@@ -10043,7 +10043,7 @@
                         "definition": {
                           "MAIN": {
                             "DEFAULT": {
-                              "bg_color": "BgCardHover",
+                              "bg_color": "BgBar",
                               "bg_opa": 255,
                               "border_width": 0,
                               "border_opa": 0,
@@ -10328,7 +10328,7 @@
                         "definition": {
                           "MAIN": {
                             "DEFAULT": {
-                              "bg_color": "BgCardHover",
+                              "bg_color": "BgBar",
                               "bg_opa": 255,
                               "border_width": 0,
                               "border_opa": 0,
@@ -10638,7 +10638,7 @@
                         "definition": {
                           "MAIN": {
                             "DEFAULT": {
-                              "bg_color": "BgCardHover",
+                              "bg_color": "BgBar",
                               "bg_opa": 255,
                               "border_width": 0,
                               "border_opa": 0,
@@ -10923,7 +10923,7 @@
                         "definition": {
                           "MAIN": {
                             "DEFAULT": {
-                              "bg_color": "BgCardHover",
+                              "bg_color": "BgBar",
                               "bg_opa": 255,
                               "border_width": 0,
                               "border_opa": 0,
@@ -11233,7 +11233,7 @@
                         "definition": {
                           "MAIN": {
                             "DEFAULT": {
-                              "bg_color": "BgCardHover",
+                              "bg_color": "BgBar",
                               "bg_opa": 255,
                               "border_width": 0,
                               "border_opa": 0,
@@ -11518,7 +11518,7 @@
                         "definition": {
                           "MAIN": {
                             "DEFAULT": {
-                              "bg_color": "BgCardHover",
+                              "bg_color": "BgBar",
                               "bg_opa": 255,
                               "border_width": 0,
                               "border_opa": 0,
@@ -11828,7 +11828,7 @@
                         "definition": {
                           "MAIN": {
                             "DEFAULT": {
-                              "bg_color": "BgCardHover",
+                              "bg_color": "BgBar",
                               "bg_opa": 255,
                               "border_width": 0,
                               "border_opa": 0,
@@ -12113,7 +12113,7 @@
                         "definition": {
                           "MAIN": {
                             "DEFAULT": {
-                              "bg_color": "BgCardHover",
+                              "bg_color": "BgBar",
                               "bg_opa": 255,
                               "border_width": 0,
                               "border_opa": 0,
@@ -12423,7 +12423,7 @@
                         "definition": {
                           "MAIN": {
                             "DEFAULT": {
-                              "bg_color": "BgCardHover",
+                              "bg_color": "BgBar",
                               "bg_opa": 255,
                               "border_width": 0,
                               "border_opa": 0,
@@ -12708,7 +12708,7 @@
                         "definition": {
                           "MAIN": {
                             "DEFAULT": {
-                              "bg_color": "BgCardHover",
+                              "bg_color": "BgBar",
                               "bg_opa": 255,
                               "border_width": 0,
                               "border_opa": 0,

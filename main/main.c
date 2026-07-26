@@ -192,7 +192,10 @@ static void io_ext_init(void)
 #define BRIGHTNESS_MIN_USER  32
 
 static uint8_t desired_brightness = 255;
-static bool    screen_timed_out   = false;
+/* Visible to other TUs so they can gate their own widget-writing paths on
+ * !screen_timed_out. The user requirement is ZERO gauge refresh while dim;
+ * on wake, the next CAN frame's setter call repopulates. */
+bool           screen_timed_out   = false;
 static int64_t s_last_wake_us = 0;
 
 int64_t screen_wake_age_us(void)
@@ -310,7 +313,13 @@ static void lcd_init(void)
     esp_lcd_rgb_panel_config_t panel_config = {
         .clk_src = LCD_CLK_SRC_DEFAULT,
         .timings = {
-            .pclk_hz = 30850000,
+            /* Reduced from vendor's 30.85 MHz to 20 MHz. 25 MHz reduced
+             * the whole-screen shift tearing but didn't eliminate it —
+             * shift was still visible during widget-update bursts
+             * (arcs / labels updating). 20 MHz widens the DMA time
+             * budget by ~35% vs vendor. Cost: refresh 33.6 Hz → 21.8 Hz.
+             * For a mostly-static gauge UI this is imperceptible. */
+            .pclk_hz = 20000000,
             .h_res = SCREEN_WIDTH,
             .v_res = SCREEN_HEIGHT,
             .hsync_pulse_width = 162,
@@ -324,14 +333,7 @@ static void lcd_init(void)
         .data_width = 16,
         .bits_per_pixel = 16,
         .num_fbs = 2,
-        /* Bumped from vendor's *10 to *20 as the first controlled margin
-         * knob after vendor-exact-clocks+Fix1+Fix2 still showed the
-         * cycling shift artifact. Each bounce now holds ~1ms of pixel
-         * data instead of ~450us, giving the PSRAM refill ISR more
-         * headroom against MSPI contention. Spotter uses the same
-         * value with a comment reporting it "noticeably cuts visible
-         * tearing/flicker." Costs 40 KB more internal SRAM. */
-        .bounce_buffer_size_px = SCREEN_WIDTH * 20,
+        .bounce_buffer_size_px = SCREEN_WIDTH * 10,
         .sram_trans_align = 4,
         .psram_trans_align = 64,
         .de_gpio_num = 5,
@@ -456,12 +458,15 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
 {
     (void)area;
     if (lv_disp_flush_is_last(drv)) {
-        /* Fix 1: draw_bitmap → drain any pre-queued swap_done tokens →
-         * blocking take. See Spotter DOCS/…/12_lvgl_transplant reference
-         * for why this ordering is load-bearing. */
-        esp_lcd_panel_draw_bitmap(panel_handle, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, color_map);
-        xSemaphoreTake(swap_done_sem, 0);
+        /* Fix 1: DRAIN → DRAW → TAKE. Matches Spotter's flush_cb exactly
+         * (TrailCurrentSpotter/main/main.c). Spotter is a working port
+         * on the same S3 + LVGL + on_frame_buf_complete architecture and
+         * uses this exact ordering; we were running draw→drain→take
+         * ("corrected" from a race theory that wasn't validated by
+         * evidence). Realigning to the empirically-working sequence. */
         s_flush_count++;
+        xSemaphoreTake(swap_done_sem, 0);
+        esp_lcd_panel_draw_bitmap(panel_handle, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, color_map);
         int64_t take_start_us = esp_timer_get_time();
         BaseType_t got = xSemaphoreTake(swap_done_sem, pdMS_TO_TICKS(100));
         uint32_t took_us = (uint32_t)(esp_timer_get_time() - take_start_us);
@@ -1450,12 +1455,19 @@ void app_main(void)
         }
 
         if (lvgl_port_lock(0)) {
+            /* lv_timer_handler must keep running during dim so the touch
+             * pipeline (wake_touch_cb via LVGL event system) fires — but
+             * everything below that would push new content into widgets
+             * is gated on !screen_timed_out per user requirement of
+             * "STOP ALL refreshing of all gauges while screen is off." */
             lv_timer_handler();
-            update_ui_from_can();
-            handle_screen_timeout();
-            ota_update_ui();
-            discovery_update_ui();
-            wifi_config_check_timeout();
+            update_ui_from_can();       /* self-gated: returns early on dim */
+            handle_screen_timeout();    /* runs during dim: manages the state */
+            if (!screen_timed_out) {
+                ota_update_ui();
+                discovery_update_ui();
+                wifi_config_check_timeout();
+            }
             lvgl_port_unlock();
         }
         vTaskDelay(pdMS_TO_TICKS(5));
