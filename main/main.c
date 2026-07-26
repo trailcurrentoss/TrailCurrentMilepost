@@ -324,7 +324,14 @@ static void lcd_init(void)
         .data_width = 16,
         .bits_per_pixel = 16,
         .num_fbs = 2,
-        .bounce_buffer_size_px = SCREEN_WIDTH * 10,
+        /* Bumped from vendor's *10 to *20 as the first controlled margin
+         * knob after vendor-exact-clocks+Fix1+Fix2 still showed the
+         * cycling shift artifact. Each bounce now holds ~1ms of pixel
+         * data instead of ~450us, giving the PSRAM refill ISR more
+         * headroom against MSPI contention. Spotter uses the same
+         * value with a comment reporting it "noticeably cuts visible
+         * tearing/flicker." Costs 40 KB more internal SRAM. */
+        .bounce_buffer_size_px = SCREEN_WIDTH * 20,
         .sram_trans_align = 4,
         .psram_trans_align = 64,
         .de_gpio_num = 5,
@@ -449,24 +456,9 @@ static void lvgl_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t 
 {
     (void)area;
     if (lv_disp_flush_is_last(drv)) {
-        /* Fix 1: submit the new framebuffer, drain any tokens fired before
-         * this moment (they correspond to the OLD cur_fb_index), then wait
-         * for the NEXT token — which is guaranteed to come from a bounce
-         * wrap that saw cur_fb_index=new, i.e. bb_fb_index has caught up
-         * to the newly-submitted fb.
-         *
-         * Ordering is DRAW → DRAIN → TAKE. This is load-bearing: draining
-         * first (before draw_bitmap) leaves a race — a wrap can fire
-         * BETWEEN drain and draw with cur_fb_index still pointing at OLD,
-         * giving us a false-positive token that lets LVGL start writing
-         * into the buffer the LCD is still scanning out. That reproduces
-         * exactly the tearing the fix is meant to eliminate. This matches
-         * the reference implementation at DOCS/…/12_lvgl_transplant/…/
-         * lvgl_port.c:210-214.
-         *
-         * The 100 ms bound + consecutive-timeout hard recovery catches the
-         * separate panel-wedge failure mode (RGB peripheral stops emitting
-         * anything). */
+        /* Fix 1: draw_bitmap → drain any pre-queued swap_done tokens →
+         * blocking take. See Spotter DOCS/…/12_lvgl_transplant reference
+         * for why this ordering is load-bearing. */
         esp_lcd_panel_draw_bitmap(panel_handle, 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, color_map);
         xSemaphoreTake(swap_done_sem, 0);
         s_flush_count++;

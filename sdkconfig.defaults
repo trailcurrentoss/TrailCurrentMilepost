@@ -60,6 +60,21 @@ CONFIG_GDMA_ISR_IRAM_SAFE=y
 # OTA rollback protection
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 
+# Task WDT panics instead of just logging. If the main (LVGL) task or
+# any other WDT-subscribed task hangs for CONFIG_ESP_TASK_WDT_TIMEOUT_S
+# (5s), we want a panic + reboot rather than silently limping.
+CONFIG_ESP_TASK_WDT_PANIC=y
+
+# Coredump to UART — the panic dumps base64-encoded coredump to the
+# same serial console as the panic backtrace, so it's captured
+# whenever the user is monitoring. Chose UART over FLASH because the
+# 16MB partition table is already fully allocated (16MB app A/B +
+# nvs) and shrinking the OTA slots would break in-flight OTA-deployed
+# devices' partition-table expectations.
+CONFIG_ESP_COREDUMP_ENABLE_TO_UART=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+
 # HTTP server for OTA uploads
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
 
@@ -71,6 +86,11 @@ CONFIG_LV_COLOR_16_SWAP=n
 CONFIG_LV_MEM_CUSTOM=y
 CONFIG_LV_MEMCPY_MEMSET_STD=y
 CONFIG_LV_ATTRIBUTE_FAST_MEM=y
+# Route hot renderer functions (blend / span / mask) into IRAM. Vendor
+# reference config for this board. Without this they live in flash/PSRAM
+# and cache misses show up as sub-100us stalls that align with visible
+# scan-position slips.
+CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=y
 
 # LVGL HAL
 CONFIG_LV_DISP_DEF_REFR_PERIOD=33
