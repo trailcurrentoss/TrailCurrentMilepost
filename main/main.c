@@ -909,7 +909,11 @@ static void can_init(void)
     s_twai_f_config.acceptance_mask = 0x07FFFFFF;
     s_twai_f_config.single_filter   = true;
 
-    xTaskCreatePinnedToCore(can_rx_task, "can_rx", 4096, NULL, 5, NULL, 1);
+    /* Priority 1 (was 5) — handle_can_frame just flag-sets, it must not
+     * outrank the main/LVGL task under CAN storms. Kept on core 1 so
+     * the TWAI ISR pins there and doesn't compete with the RGB DMA ISR
+     * on core 0. */
+    xTaskCreatePinnedToCore(can_rx_task, "can_rx", 4096, NULL, 1, NULL, 1);
 }
 
 bool can_send(uint32_t id, const uint8_t *data, uint8_t len)

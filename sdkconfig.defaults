@@ -26,6 +26,12 @@ CONFIG_SPIRAM_SPEED_120M=y
 CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
 CONFIG_SPIRAM_RODATA=y
 CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+# 120MHz OPI PSRAM has a narrow data-valid window that shifts with die
+# temperature. ECC detects+corrects single-bit read errors that would
+# otherwise land in the RGB bounce buffer as corrupted pixels — the
+# hardware-side equivalent of the "started tearing after hours" onset
+# the vendor baseline saw once the die warmed up.
+CONFIG_SPIRAM_ECC_ENABLE=y
 
 # Compiler optimization
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
