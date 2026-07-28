@@ -622,6 +622,10 @@ static volatile bool     g_temperature_updated = false;
 /* GPS (CAN 0x07/0x08/0x09) */
 static volatile uint8_t  g_gps_num_sats = 0;
 static volatile uint8_t  g_gps_gnss_mode = 0;
+/* Bearing 0x07 sends speed as knots x 100 and course as degrees x 10.
+ * Stored raw here; scaled in the consumer (same pattern as altitude). */
+static volatile uint16_t g_gps_speed_raw = 0;
+static volatile uint16_t g_gps_course_raw = 0;
 static volatile uint32_t g_gps_altitude_raw = 0;
 static volatile float    g_gps_latitude = 0.0f;
 static volatile float    g_gps_longitude = 0.0f;
@@ -743,8 +747,11 @@ static void handle_can_frame(const twai_message_t *msg)
         }
         g_temperature_updated = true;
     } else if (msg->identifier == CAN_ID_GPS_SAT_SPEED && msg->data_length_code >= 6) {
-        g_gps_num_sats  = msg->data[0];
-        g_gps_gnss_mode = msg->data[5];
+        /* Bearing 0x07: [sats, speed_h, speed_l, course_h, course_l, mode] */
+        g_gps_num_sats   = msg->data[0];
+        g_gps_speed_raw  = ((uint16_t)msg->data[1] << 8) | msg->data[2];
+        g_gps_course_raw = ((uint16_t)msg->data[3] << 8) | msg->data[4];
+        g_gps_gnss_mode  = msg->data[5];
         g_gps_sat_updated = true;
     } else if (msg->identifier == CAN_ID_GPS_ALTITUDE && msg->data_length_code >= 4) {
         g_gps_altitude_raw = ((uint32_t)msg->data[0] << 24) |
@@ -1236,6 +1243,9 @@ static void update_ui_from_can(void)
         g_gps_sat_updated = false;
         set_var_satellite_count((int32_t)g_gps_num_sats);
         set_var_gnss_mode(gnss_mode_string(g_gps_gnss_mode));
+        /* Raw fields are knots x 100 / degrees x 10 — scale to native units. */
+        set_var_speed((float)g_gps_speed_raw * 0.01f);
+        set_var_course((float)g_gps_course_raw * 0.1f);
     }
 
     if (g_gps_alt_updated) {

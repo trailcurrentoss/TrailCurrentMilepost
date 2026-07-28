@@ -1,6 +1,6 @@
 {
   "navigation": {
-    "selectedUserPageObject": "[TrailCurrentMilepost.eez-project]:/userPages/4",
+    "selectedUserPageObject": "[TrailCurrentMilepost.eez-project]:/userPages/0",
     "selectedUserWidgetObject": "[TrailCurrentMilepost.eez-project]:/userWidgets/0",
     "selectedActionObject": "[TrailCurrentMilepost.eez-project]:/actions/0",
     "selectedThemeObject": "[TrailCurrentMilepost.eez-project]:/themes/0",
@@ -195,10 +195,32 @@
               "type": "tabset",
               "id": "EDITORS",
               "weight": 57.8201443480492,
-              "selected": 1,
               "enableDeleteWhenEmpty": false,
               "enableClose": false,
               "children": [
+                {
+                  "type": "tab",
+                  "id": "#00ad5816-fea0-4f03-9fb8-4e6e6a541e43",
+                  "name": "PageHome",
+                  "component": "editor",
+                  "config": {
+                    "objectPath": "[TrailCurrentMilepost.eez-project]:/userPages/0",
+                    "permanent": false
+                  },
+                  "icon": "svg:page"
+                },
+                {
+                  "type": "tab",
+                  "id": "#cfe580f8-195a-49df-8468-41b583adaf48",
+                  "name": "Settings",
+                  "component": "editor",
+                  "config": {
+                    "objectPath": "[TrailCurrentMilepost.eez-project]:/settings",
+                    "subObjectPath": "[TrailCurrentMilepost.eez-project]:/settings",
+                    "permanent": false
+                  },
+                  "icon": "material:settings"
+                },
                 {
                   "type": "tab",
                   "id": "#85400ac5-5ac0-4e08-a53a-0229755092ec",
@@ -1574,17 +1596,19 @@
     "[TrailCurrentMilepost.eez-project]:/userPages/0[flow-state]": {
       "selection": {
         "0": {
-          "0": {},
+          "0": {
+            "8": {},
+            "9": {},
+            "10": {}
+          },
           "1": {},
-          "2": {
-            "$selected": true
-          }
+          "2": {}
         }
       },
       "transform": {
         "translate": {
-          "x": -400,
-          "y": -240
+          "x": -524,
+          "y": -287
         },
         "scale": 1
       },
